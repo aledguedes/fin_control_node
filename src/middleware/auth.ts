@@ -4,7 +4,7 @@ import { createError } from './errorHandler';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
-    id: string;
+    userId: string;
     email: string;
   };
 }
@@ -28,7 +28,7 @@ export const authenticateToken = (
     };
 
     req.user = {
-      id: decoded.userId,
+      userId: decoded.userId,
       email: decoded.email
     };
 

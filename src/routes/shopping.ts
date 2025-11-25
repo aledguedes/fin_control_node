@@ -1,629 +1,1233 @@
 import express from 'express';
-import { supabase } from '../server';
+import { DatabaseService } from '../services/databaseService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../validation';
-import { 
-  shoppingListSchema, 
+
+import {
+  shoppingListSchema,
   shoppingListItemSchema,
   productSchema,
-  shoppingCategorySchema
+  shoppingCategorySchema,
 } from '../validation/schemas';
 import { createError } from '../middleware/errorHandler';
-import { ShoppingList, ShoppingListWithItems, Product, ShoppingCategory } from '../types';
 
 const router = express.Router();
 
-// Todas as rotas de compras precisam de autenticação
-router.use(authenticateToken);
+/**
+ * @swagger
+ * /shopping/lists:
+ *   get:
+ *     summary: Listar listas de compras
+ *     description: Retorna todas as listas de compras do usuário autenticado
+ *     tags:
+ *       - Compras - Listas
+ *     responses:
+ *       200:
+ *         description: Lista de listas retornada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 lists:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ShoppingList'
+ *       500:
+ *         description: Erro ao buscar listas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Listar listas de compras
+router.get(
+  '/lists',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const result = await DatabaseService.getShoppingLists(userId);
 
-// CRUD de listas de compras
-router.get('/lists', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { data: lists, error } = await supabase
-      .from('tbl_shopping_lists')
-      .select('*')
-      .eq('user_id', req.user!.id)
-      .order('created_at', { ascending: false });
+      if (result?.error) {
+        return next(createError('Erro ao buscar listas', 500));
+      }
 
-    if (error) {
-      return next(createError('Erro ao buscar listas', 500));
+      res.json({ lists: result?.data || [] });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.json(lists);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/lists:
+ *   post:
+ *     summary: Criar lista de compras
+ *     description: Cria uma nova lista de compras para o usuário autenticado
+ *     tags:
+ *       - Compras - Listas
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Nome da lista
+ *                 example: Compras do mês
+ *     responses:
+ *       201:
+ *         description: Lista criada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 list:
+ *                   $ref: '#/components/schemas/ShoppingList'
+ *       500:
+ *         description: Erro ao criar lista
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Criar lista de compras
+router.post(
+  '/lists',
+  authenticateToken,
+  validateRequest(shoppingListSchema),
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { name } = req.body;
 
-router.get('/lists/:id', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
+      // Implementação simplificada - criar diretamente
+      const result = await DatabaseService.createShoppingList({
+        name,
+        user_id: userId,
+      });
 
-    const { data: list, error: listError } = await supabase
-      .from('tbl_shopping_lists')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
+      if (result?.error) {
+        return next(createError('Erro ao criar lista', 500));
+      }
 
-    if (listError || !list) {
-      return next(createError('Lista não encontrada', 404));
+      res.status(201).json({ list: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    const { data: items, error: itemsError } = await supabase
-      .from('tbl_shopping_list_items')
-      .select(`
-        *,
-        tbl_products (*)
-      `)
-      .eq('shopping_list_id', id);
+/**
+ * @swagger
+ * /shopping/products:
+ *   get:
+ *     summary: Listar produtos
+ *     description: Retorna todos os produtos cadastrados pelo usuário
+ *     tags:
+ *       - Compras - Produtos
+ *     responses:
+ *       200:
+ *         description: Lista de produtos retornada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Product'
+ *       500:
+ *         description: Erro ao buscar produtos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Listar produtos
+router.get(
+  '/products',
+  authenticateToken,
+  validateRequest(productSchema),
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const result = await DatabaseService.getProducts(userId);
 
-    if (itemsError) {
-      return next(createError('Erro ao buscar itens da lista', 500));
+      if (result?.error) {
+        return next(createError('Erro ao buscar produtos', 500));
+      }
+
+      res.json({ products: result?.data || [] });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    const listWithItems: ShoppingListWithItems = {
-      ...list,
-      items: items?.map(item => ({
-        ...item,
-        product: item.tbl_products
-      })) || []
-    };
+/**
+ * @swagger
+ * /shopping/categories:
+ *   get:
+ *     summary: Listar categorias de compra
+ *     description: Retorna todas as categorias de compra do usuário
+ *     tags:
+ *       - Compras - Categorias
+ *     responses:
+ *       200:
+ *         description: Lista de categorias retornada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 categories:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ShoppingCategory'
+ *       500:
+ *         description: Erro ao buscar categorias
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Listar categorias de compra
+router.get(
+  '/categories',
+  authenticateToken,
+  validateRequest(shoppingCategorySchema),
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const result = await DatabaseService.getShoppingCategories(userId);
 
-    res.json(listWithItems);
-  } catch (error) {
-    next(error);
-  }
-});
+      if (result?.error) {
+        return next(createError('Erro ao buscar categorias', 500));
+      }
 
-router.post('/lists', validateRequest(shoppingListSchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const listData = {
-      ...req.body,
-      user_id: req.user!.id,
-      status: 'andamento'
-    };
-
-    const { data: list, error } = await supabase
-      .from('tbl_shopping_lists')
-      .insert([listData])
-      .select('*')
-      .single();
-
-    if (error) {
-      return next(createError('Erro ao criar lista', 500));
+      res.json({ categories: result?.data || [] });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.status(201).json(list);
-  } catch (error) {
-    next(error);
-  }
-});
+// Criar categoria de compra
+router.post(
+  '/categories',
+  authenticateToken,
+  validateRequest(shoppingCategorySchema),
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { name } = req.body;
 
-router.delete('/lists/:id', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
+      const result = await DatabaseService.createShoppingCategory({
+        name,
+        user_id: userId,
+      });
 
-    // Verificar se a lista existe e pertence ao usuário
-    const { data: existingList } = await supabase
-      .from('tbl_shopping_lists')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
+      if (result?.error) {
+        return next(createError('Erro ao criar categoria', 500));
+      }
 
-    if (!existingList) {
-      return next(createError('Lista não encontrada', 404));
+      res.status(201).json({ category: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    // Excluir itens da lista primeiro
-    const { error: deleteItemsError } = await supabase
-      .from('tbl_shopping_list_items')
-      .delete()
-      .eq('shopping_list_id', id);
+/**
+ * @swagger
+ * /shopping/products:
+ *   post:
+ *     summary: Criar produto
+ *     description: Cria um novo produto no catálogo do usuário
+ *     tags:
+ *       - Compras - Produtos
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - unit
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Nome do produto
+ *                 example: Arroz Integral 5kg
+ *               unit:
+ *                 type: string
+ *                 enum: [un, kg, l, dz, m, cx]
+ *                 description: Unidade de medida
+ *                 example: un
+ *     responses:
+ *       201:
+ *         description: Produto criado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 product:
+ *                   $ref: '#/components/schemas/Product'
+ *       500:
+ *         description: Erro ao criar produto
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Criar produto
+router.post(
+  '/products',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { name, unit } = req.body;
 
-    if (deleteItemsError) {
-      return next(createError('Erro ao excluir itens da lista', 500));
-    }
-
-    // Excluir a lista
-    const { error: deleteListError } = await supabase
-      .from('tbl_shopping_lists')
-      .delete()
-      .eq('id', id);
-
-    if (deleteListError) {
-      return next(createError('Erro ao excluir lista', 500));
-    }
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Finalizar lista de compras
-router.post('/lists/:id/complete', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
-
-    // Buscar itens da lista
-    const { data: items, error: itemsError } = await supabase
-      .from('tbl_shopping_list_items')
-      .select('*')
-      .eq('shopping_list_id', id);
-
-    if (itemsError) {
-      return next(createError('Erro ao buscar itens da lista', 500));
-    }
-
-    // Calcular valor total
-    const totalAmount = items?.reduce((sum, item) => {
-      return sum + (item.quantity * item.price);
-    }, 0) || 0;
-
-    // Atualizar lista como finalizada
-    const { data: list, error: updateError } = await supabase
-      .from('tbl_shopping_lists')
-      .update({
-        status: 'finalizada',
-        completed_at: new Date().toISOString(),
-        total_amount: totalAmount
-      })
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .select('*')
-      .single();
-
-    if (updateError || !list) {
-      return next(createError('Erro ao finalizar lista', 500));
-    }
-
-    res.json(list);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// CRUD de itens da lista
-router.post('/lists/:listId/items', validateRequest(shoppingListItemSchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { listId } = req.params;
-    const itemData = {
-      ...req.body,
-      shopping_list_id: listId,
-      checked: false
-    };
-
-    // Verificar se a lista existe e pertence ao usuário
-    const { data: list } = await supabase
-      .from('tbl_shopping_lists')
-      .select('id')
-      .eq('id', listId)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!list) {
-      return next(createError('Lista não encontrada', 404));
-    }
-
-    // Verificar se o produto existe e pertence ao usuário
-    const { data: product } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('id', itemData.product_id)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!product) {
-      return next(createError('Produto não encontrado', 404));
-    }
-
-    const { data: item, error } = await supabase
-      .from('tbl_shopping_list_items')
-      .insert([itemData])
-      .select('*')
-      .single();
-
-    if (error) {
-      return next(createError('Erro ao adicionar item', 500));
-    }
-
-    res.status(201).json(item);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.put('/lists/:listId/items/:itemId', validateRequest(shoppingListItemSchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { listId, itemId } = req.params;
-    const { quantity, price, product_id } = req.body;
-
-    // Verificar se o item existe e pertence à lista do usuário
-    const { data: existingItem } = await supabase
-      .from('tbl_shopping_list_items')
-      .select('id')
-      .eq('id', itemId)
-      .eq('shopping_list_id', listId)
-      .single();
-
-    if (!existingItem) {
-      return next(createError('Item não encontrado', 404));
-    }
-
-    // Verificar se a lista pertence ao usuário
-    const { data: list } = await supabase
-      .from('tbl_shopping_lists')
-      .select('id')
-      .eq('id', listId)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!list) {
-      return next(createError('Lista não encontrada', 404));
-    }
-
-    // Verificar se o novo produto existe e pertence ao usuário
-    const { data: product } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('id', product_id)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!product) {
-      return next(createError('Produto não encontrado', 404));
-    }
-
-    const { data: item, error } = await supabase
-      .from('tbl_shopping_list_items')
-      .update({
-        quantity,
-        price,
-        product_id
-      })
-      .eq('id', itemId)
-      .select('*')
-      .single();
-
-    if (error) {
-      return next(createError('Erro ao atualizar item', 500));
-    }
-
-    res.json(item);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete('/lists/:listId/items/:itemId', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { listId, itemId } = req.params;
-
-    // Verificar se o item existe e pertence à lista do usuário
-    const { data: existingItem } = await supabase
-      .from('tbl_shopping_list_items')
-      .select('id')
-      .eq('id', itemId)
-      .eq('shopping_list_id', listId)
-      .single();
-
-    if (!existingItem) {
-      return next(createError('Item não encontrado', 404));
-    }
-
-    // Verificar se a lista pertence ao usuário
-    const { data: list } = await supabase
-      .from('tbl_shopping_lists')
-      .select('id')
-      .eq('id', listId)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!list) {
-      return next(createError('Lista não encontrada', 404));
-    }
-
-    const { error } = await supabase
-      .from('tbl_shopping_list_items')
-      .delete()
-      .eq('id', itemId);
-
-    if (error) {
-      return next(createError('Erro ao excluir item', 500));
-    }
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
-
-// CRUD de produtos
-router.get('/products', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { data: products, error } = await supabase
-      .from('tbl_products')
-      .select('*')
-      .eq('user_id', req.user!.id)
-      .order('name', { ascending: true });
-
-    if (error) {
-      return next(createError('Erro ao buscar produtos', 500));
-    }
-
-    res.json(products);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/products', validateRequest(productSchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const productData = {
-      ...req.body,
-      user_id: req.user!.id
-    };
-
-    // Verificar se a categoria existe e pertence ao usuário
-    const { data: category } = await supabase
-      .from('tbl_shopping_categories')
-      .select('id')
-      .eq('id', productData.category_id)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!category) {
-      return next(createError('Categoria não encontrada', 404));
-    }
-
-    const { data: product, error } = await supabase
-      .from('tbl_products')
-      .insert([productData])
-      .select('*')
-      .single();
-
-    if (error) {
-      return next(createError('Erro ao criar produto', 500));
-    }
-
-    res.status(201).json(product);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.put('/products/:id', validateRequest(productSchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
-    const { name, unit, category_id } = req.body;
-
-    // Verificar se o produto existe e pertence ao usuário
-    const { data: existingProduct } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!existingProduct) {
-      return next(createError('Produto não encontrado', 404));
-    }
-
-    // Verificar se a nova categoria existe e pertence ao usuário
-    const { data: category } = await supabase
-      .from('tbl_shopping_categories')
-      .select('id')
-      .eq('id', category_id)
-      .eq('user_id', req.user!.id)
-      .single();
-
-    if (!category) {
-      return next(createError('Categoria não encontrada', 404));
-    }
-
-    // Verificar se há listas de compras usando este produto
-    const { data: existingItems } = await supabase
-      .from('tbl_shopping_list_items')
-      .select('id')
-      .eq('product_id', id)
-      .limit(1);
-
-    if (existingItems && existingItems.length > 0) {
-      return next(createError('Não é possível alterar o produto pois ele está sendo usado em listas de compras', 409));
-    }
-
-    const { data: product, error } = await supabase
-      .from('tbl_products')
-      .update({
+      const result = await DatabaseService.createProduct({
         name,
         unit,
-        category_id
-      })
-      .eq('id', id)
-      .select('*')
-      .single();
+        user_id: userId,
+      });
 
-    if (error) {
-      return next(createError('Erro ao atualizar produto', 500));
+      if (result?.error) {
+        return next(createError('Erro ao criar produto', 500));
+      }
+
+      res.status(201).json({ product: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.json(product);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/lists/{id}:
+ *   get:
+ *     summary: Detalhes da lista com itens
+ *     description: Retorna os detalhes completos de uma lista de compras incluindo todos os itens
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *     responses:
+ *       200:
+ *         description: Detalhes da lista retornados com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 list:
+ *                   $ref: '#/components/schemas/ShoppingList'
+ *       404:
+ *         description: Lista não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao buscar lista
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Detalhes da lista com itens
+router.get(
+  '/lists/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
 
-router.delete('/products/:id', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
+      if (!id) {
+        return next(createError('ID da lista é obrigatório', 400));
+      }
 
-    // Verificar se o produto existe e pertence ao usuário
-    const { data: existingProduct } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
+      const result = await DatabaseService.getShoppingListWithItems(id, userId);
 
-    if (!existingProduct) {
-      return next(createError('Produto não encontrado', 404));
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ list: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    // Verificar se há listas de compras usando este produto
-    const { data: existingItems } = await supabase
-      .from('tbl_shopping_list_items')
-      .select('id')
-      .eq('product_id', id)
-      .limit(1);
+/**
+ * @swagger
+ * /shopping/lists/{id}:
+ *   delete:
+ *     summary: Excluir lista
+ *     description: Exclui uma lista de compras e todos os seus itens
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *     responses:
+ *       200:
+ *         description: Lista excluída com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Lista excluída com sucesso
+ *       404:
+ *         description: Lista não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao excluir lista
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Excluir lista
+router.delete(
+  '/lists/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
 
-    if (existingItems && existingItems.length > 0) {
-      return next(createError('Não é possível excluir o produto pois ele está sendo usado em listas de compras', 409));
+      if (!id) {
+        return next(createError('ID da lista é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.deleteShoppingList(id, userId);
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ message: 'Lista excluída com sucesso' });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    const { error } = await supabase
-      .from('tbl_products')
-      .delete()
-      .eq('id', id);
+/**
+ * @swagger
+ * /shopping/lists/{id}/complete:
+ *   post:
+ *     summary: Finalizar lista
+ *     description: Marca uma lista de compras como finalizada e calcula o valor total
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *     responses:
+ *       200:
+ *         description: Lista finalizada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 list:
+ *                   $ref: '#/components/schemas/ShoppingList'
+ *       404:
+ *         description: Lista não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao finalizar lista
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Finalizar lista
+router.post(
+  '/lists/:id/complete',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
 
-    if (error) {
-      return next(createError('Erro ao excluir produto', 500));
+      if (!id) {
+        return next(createError('ID da lista é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.completeShoppingList(id, userId);
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      // Cria transação financeira (expense) referente à lista finalizada
+      const completedList = result?.data;
+      if (completedList) {
+        const description = `Compras: ${completedList.name || 'Lista'}`;
+        const amount = completedList.total_amount || 0;
+        const transactionResult =
+          await DatabaseService.createFinancialTransaction({
+            description,
+            amount,
+            type: 'expense',
+            category_id: null,
+            user_id: userId,
+            transaction_date:
+              completedList.completed_at ||
+              new Date().toISOString().split('T')[0],
+            is_installment: false,
+            total_installments: 1,
+            start_date:
+              completedList.completed_at ||
+              new Date().toISOString().split('T')[0],
+          });
+        if (transactionResult?.error) {
+          return next(createError('Erro ao criar transação financeira', 500));
+        }
+        res.json({ list: completedList, transaction: transactionResult?.data });
+        return;
+      }
+      // Caso não haja lista (deveria não acontecer), apenas retorna a lista
+      res.json({ list: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/lists/{listId}/items:
+ *   post:
+ *     summary: Adicionar item à lista
+ *     description: Adiciona um novo item a uma lista de compras
+ *     tags:
+ *       - Compras - Itens
+ *     parameters:
+ *       - in: path
+ *         name: listId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - product_id
+ *               - quantity
+ *             properties:
+ *               product_id:
+ *                 type: integer
+ *                 description: ID do produto
+ *                 example: 1
+ *               quantity:
+ *                 type: number
+ *                 format: decimal
+ *                 description: Quantidade do produto
+ *                 example: 2.5
+ *               price:
+ *                 type: number
+ *                 format: decimal
+ *                 description: Preço unitário
+ *                 example: 15.99
+ *               category_id:
+ *                 type: integer
+ *                 description: ID da categoria (opcional)
+ *     responses:
+ *       201:
+ *         description: Item adicionado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 item:
+ *                   $ref: '#/components/schemas/ShoppingItem'
+ *       404:
+ *         description: Lista não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao criar item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Adicionar item à lista
+router.post(
+  '/lists/:listId/items',
+  authenticateToken,
+  validateRequest(shoppingListItemSchema),
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { listId } = req.params;
+      const { quantity, price, product_id, category_id } = req.body;
 
-// CRUD de categorias de compras
-router.get('/categories', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { data: categories, error } = await supabase
-      .from('tbl_shopping_categories')
-      .select('*')
-      .eq('user_id', req.user!.id)
-      .order('name', { ascending: true });
+      if (!listId) {
+        return next(createError('ID da lista é obrigatório', 400));
+      }
 
-    if (error) {
-      return next(createError('Erro ao buscar categorias', 500));
+      // Verificar se a lista existe e pertence ao usuário
+      const listCheck = await DatabaseService.getShoppingListById(
+        listId,
+        userId,
+      );
+      if (!listCheck || !listCheck.data) {
+        return next(createError('Lista não encontrada', 404));
+      }
+
+      const result = await DatabaseService.createShoppingItem({
+        quantity,
+        price: price || 0,
+        shopping_list_id: listId,
+        product_id,
+        category_id,
+        user_id: userId,
+      });
+
+      if (result?.error) {
+        return next(createError('Erro ao criar item', 500));
+      }
+
+      res.status(201).json({ item: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.json(categories);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/lists/{listId}/items/{itemId}:
+ *   put:
+ *     summary: Atualizar item da lista
+ *     description: Atualiza a quantidade, preço ou status de um item da lista
+ *     tags:
+ *       - Compras - Itens
+ *     parameters:
+ *       - in: path
+ *         name: listId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do item
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               quantity:
+ *                 type: number
+ *                 format: decimal
+ *                 description: Nova quantidade
+ *               price:
+ *                 type: number
+ *                 format: decimal
+ *                 description: Novo preço unitário
+ *               checked:
+ *                 type: boolean
+ *                 description: Marcar/desmarcar item como comprado
+ *     responses:
+ *       200:
+ *         description: Item atualizado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 item:
+ *                   $ref: '#/components/schemas/ShoppingItem'
+ *       404:
+ *         description: Lista ou item não encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao atualizar item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Atualizar item da lista
+router.put(
+  '/lists/:listId/items/:itemId',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { listId, itemId } = req.params;
+      const { quantity, price, checked } = req.body;
 
-router.post('/categories', validateRequest(shoppingCategorySchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const categoryData = {
-      ...req.body,
-      user_id: req.user!.id
-    };
+      if (!listId || !itemId) {
+        return next(createError('IDs são obrigatórios', 400));
+      }
 
-    const { data: category, error } = await supabase
-      .from('tbl_shopping_categories')
-      .insert([categoryData])
-      .select('*')
-      .single();
+      const result = await DatabaseService.updateShoppingItem(
+        itemId,
+        listId,
+        userId,
+        { quantity, price, checked },
+      );
 
-    if (error) {
-      return next(createError('Erro ao criar categoria', 500));
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ item: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.status(201).json(category);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/lists/{listId}/items/{itemId}:
+ *   delete:
+ *     summary: Excluir item da lista
+ *     description: Remove um item de uma lista de compras
+ *     tags:
+ *       - Compras - Itens
+ *     parameters:
+ *       - in: path
+ *         name: listId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da lista de compras
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do item
+ *     responses:
+ *       200:
+ *         description: Item excluído com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Item excluído com sucesso
+ *       404:
+ *         description: Lista ou item não encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao excluir item
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Excluir item da lista
+router.delete(
+  '/lists/:listId/items/:itemId',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { listId, itemId } = req.params;
 
-router.put('/categories/:id', validateRequest(shoppingCategorySchema), async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
-    const { name } = req.body;
+      if (!listId || !itemId) {
+        return next(createError('IDs são obrigatórios', 400));
+      }
 
-    // Verificar se a categoria existe e pertence ao usuário
-    const { data: existingCategory } = await supabase
-      .from('tbl_shopping_categories')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
+      const result = await DatabaseService.deleteShoppingItem(
+        itemId,
+        listId,
+        userId,
+      );
 
-    if (!existingCategory) {
-      return next(createError('Categoria não encontrada', 404));
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ message: 'Item excluído com sucesso' });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    // Verificar se há produtos usando esta categoria
-    const { data: existingProducts } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('category_id', id)
-      .limit(1);
+/**
+ * @swagger
+ * /shopping/products/{id}:
+ *   put:
+ *     summary: Atualizar produto
+ *     description: Atualiza as informações de um produto
+ *     tags:
+ *       - Compras - Produtos
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do produto
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Nome do produto
+ *               unit:
+ *                 type: string
+ *                 enum: [un, kg, l, dz, m, cx]
+ *                 description: Unidade de medida
+ *               category_id:
+ *                 type: integer
+ *                 description: ID da categoria
+ *     responses:
+ *       200:
+ *         description: Produto atualizado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 product:
+ *                   $ref: '#/components/schemas/Product'
+ *       404:
+ *         description: Produto não encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao atualizar produto
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Atualizar produto
+router.put(
+  '/products/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
+      const { name, unit, category_id } = req.body;
 
-    if (existingProducts && existingProducts.length > 0) {
-      return next(createError('Não é possível alterar a categoria pois ela está sendo usada por produtos', 409));
+      if (!id) {
+        return next(createError('ID do produto é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.updateProduct(id, userId, {
+        name,
+        unit,
+        category_id,
+      });
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Produto não encontrado' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ product: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    const { data: category, error } = await supabase
-      .from('tbl_shopping_categories')
-      .update({ name })
-      .eq('id', id)
-      .select('*')
-      .single();
+/**
+ * @swagger
+ * /shopping/products/{id}:
+ *   delete:
+ *     summary: Excluir produto
+ *     description: Exclui um produto do catálogo (não permitido se houver dependências)
+ *     tags:
+ *       - Compras - Produtos
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do produto
+ *     responses:
+ *       200:
+ *         description: Produto excluído com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Produto excluído com sucesso
+ *       404:
+ *         description: Produto não encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       409:
+ *         description: Produto possui dependências e não pode ser excluído
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao excluir produto
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Excluir produto
+router.delete(
+  '/products/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
 
-    if (error) {
-      return next(createError('Erro ao atualizar categoria', 500));
+      if (!id) {
+        return next(createError('ID do produto é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.deleteProduct(id, userId);
+
+      if (result?.error) {
+        if (result.error.code === 'DEPENDENCY_ERROR') {
+          return next(createError(result.error.message, 409));
+        }
+        const statusCode =
+          result.error.message === 'Produto não encontrado' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ message: 'Produto excluído com sucesso' });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.json(category);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * @swagger
+ * /shopping/categories:
+ *   post:
+ *     summary: Criar categoria de compras
+ *     description: Cria uma nova categoria para organizar produtos
+ *     tags:
+ *       - Compras - Categorias
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Nome da categoria
+ *                 example: Higiene
+ *     responses:
+ *       201:
+ *         description: Categoria criada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 category:
+ *                   $ref: '#/components/schemas/ShoppingCategory'
+ *       400:
+ *         description: Nome da categoria é obrigatório
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao criar categoria
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Criar categoria de compras
+router.post(
+  '/categories',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { name } = req.body;
 
-router.delete('/categories/:id', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { id } = req.params;
+      if (!name) {
+        return next(createError('Nome da categoria é obrigatório', 400));
+      }
 
-    // Verificar se a categoria existe e pertence ao usuário
-    const { data: existingCategory } = await supabase
-      .from('tbl_shopping_categories')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', req.user!.id)
-      .single();
+      const result = await DatabaseService.createShoppingCategory({
+        name,
+        user_id: userId,
+      });
 
-    if (!existingCategory) {
-      return next(createError('Categoria não encontrada', 404));
+      if (result?.error) {
+        return next(createError('Erro ao criar categoria', 500));
+      }
+
+      res.status(201).json({ category: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    // Verificar se há produtos usando esta categoria
-    const { data: existingProducts } = await supabase
-      .from('tbl_products')
-      .select('id')
-      .eq('category_id', id)
-      .limit(1);
+/**
+ * @swagger
+ * /shopping/categories/{id}:
+ *   put:
+ *     summary: Atualizar categoria de compras
+ *     description: Atualiza o nome de uma categoria
+ *     tags:
+ *       - Compras - Categorias
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da categoria
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Novo nome da categoria
+ *     responses:
+ *       200:
+ *         description: Categoria atualizada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 category:
+ *                   $ref: '#/components/schemas/ShoppingCategory'
+ *       400:
+ *         description: Parâmetros inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Categoria não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao atualizar categoria
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Atualizar categoria de compras
+router.put(
+  '/categories/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
+      const { name } = req.body;
 
-    if (existingProducts && existingProducts.length > 0) {
-      return next(createError('Não é possível excluir a categoria pois ela está sendo usada por produtos', 409));
+      if (!id) {
+        return next(createError('ID da categoria é obrigatório', 400));
+      }
+
+      if (!name) {
+        return next(createError('Nome da categoria é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.updateShoppingCategory(id, userId, {
+        name,
+      });
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Categoria não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ category: result?.data });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    const { error } = await supabase
-      .from('tbl_shopping_categories')
-      .delete()
-      .eq('id', id);
+/**
+ * @swagger
+ * /shopping/categories/{id}:
+ *   delete:
+ *     summary: Excluir categoria de compras
+ *     description: Exclui uma categoria (não permitido se houver produtos associados)
+ *     tags:
+ *       - Compras - Categorias
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID da categoria
+ *     responses:
+ *       200:
+ *         description: Categoria excluída com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Categoria excluída com sucesso
+ *       404:
+ *         description: Categoria não encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       409:
+ *         description: Categoria possui produtos associados e não pode ser excluída
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erro ao excluir categoria
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Excluir categoria de compras
+router.delete(
+  '/categories/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
 
-    if (error) {
-      return next(createError('Erro ao excluir categoria', 500));
+      if (!id) {
+        return next(createError('ID da categoria é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.deleteShoppingCategory(id, userId);
+
+      if (result?.error) {
+        if (result.error.code === 'DEPENDENCY_ERROR') {
+          return next(createError(result.error.message, 409));
+        }
+        const statusCode =
+          result.error.message === 'Categoria não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ message: 'Categoria excluída com sucesso' });
+    } catch (error) {
+      next(error);
     }
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
+  },
+);
 
 export default router;

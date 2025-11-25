@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS tbl_transactions (
   description TEXT NOT NULL,
   amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
   type VARCHAR(10) NOT NULL CHECK (type IN ('revenue', 'expense')),
-  date DATE NOT NULL,
+  transaction_date DATE NOT NULL,
   payment_method VARCHAR(50) NOT NULL,
   is_installment BOOLEAN DEFAULT FALSE,
   category_id UUID NOT NULL REFERENCES tbl_financial_categories(id) ON DELETE RESTRICT,
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS tbl_transactions (
 -- Criar índices para performance
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON tbl_transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_category_id ON tbl_transactions(category_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_date ON tbl_transactions(date);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON tbl_transactions(transaction_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON tbl_transactions(type);
 CREATE INDEX IF NOT EXISTS idx_transactions_is_installment ON tbl_transactions(is_installment);
 
