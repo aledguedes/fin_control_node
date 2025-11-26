@@ -156,7 +156,6 @@ router.post(
 router.get(
   '/products',
   authenticateToken,
-  validateRequest(productSchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -204,7 +203,6 @@ router.get(
 router.get(
   '/categories',
   authenticateToken,
-  validateRequest(shoppingCategorySchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -839,7 +837,7 @@ router.delete(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *         description: ID do produto
  *     requestBody:
  *       required: true

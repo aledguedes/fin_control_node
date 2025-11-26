@@ -86,52 +86,111 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
-        Transaction: {
+        TransactionResponse: {
           type: 'object',
           properties: {
-            id: {
-              type: 'integer',
-              description: 'Identificador único da transação',
-            },
-            description: {
-              type: 'string',
-              description: 'Descrição da transação',
-              example: 'Pagamento de aluguel',
-            },
+            id: { type: 'integer', description: 'ID da transação' },
+            description: { type: 'string', description: 'Descrição' },
             amount: {
               type: 'number',
               format: 'decimal',
-              description: 'Valor total da transação',
-              example: 1500.0,
+              description: 'Valor total',
             },
             type: {
               type: 'string',
               enum: ['revenue', 'expense'],
-              description: 'Tipo da transação (receita ou despesa)',
+              description: 'Tipo',
             },
             transaction_date: {
               type: 'string',
               format: 'date',
-              description: 'Data da transação (YYYY-MM-DD)',
-              example: '2024-01-15',
+              description: 'Data da transação',
             },
-            category_id: {
-              type: 'integer',
-              description: 'ID da categoria financeira',
-            },
+            category_id: { type: 'integer', description: 'ID da categoria' },
             installment_number: {
               type: 'integer',
-              description: 'Número da parcela atual',
-              default: 1,
+              description: 'Número da parcela',
             },
             total_installments: {
               type: 'integer',
               description: 'Total de parcelas',
-              default: 1,
             },
-            user_id: {
+            is_installment: { type: 'boolean', description: 'É parcelada?' },
+            is_recurrent: { type: 'boolean', description: 'É recorrente?' },
+            recurrence_start_date: {
+              type: 'string',
+              format: 'date',
+              description: 'Data início recorrência',
+              nullable: true,
+            },
+            installments: { $ref: '#/components/schemas/Installments' },
+            payment_method: {
+              type: 'string',
+              description: 'Método de pagamento',
+              nullable: true,
+            },
+            user_id: { type: 'integer', description: 'ID do usuário' },
+          },
+        },
+        TransactionCreate: {
+          type: 'object',
+          required: [
+            'description',
+            'amount',
+            'type',
+            'category_id',
+            'transaction_date',
+          ],
+          properties: {
+            description: { type: 'string', description: 'Descrição' },
+            amount: {
+              type: 'number',
+              format: 'decimal',
+              description: 'Valor total',
+            },
+            type: {
+              type: 'string',
+              enum: ['revenue', 'expense'],
+              description: 'Tipo',
+            },
+            category_id: { type: 'integer', description: 'ID da categoria' },
+            transaction_date: {
+              type: 'string',
+              format: 'date',
+              description: 'Data da transação',
+            },
+            is_installment: { type: 'boolean', description: 'É parcelada?' },
+            is_recurrent: { type: 'boolean', description: 'É recorrente?' },
+            recurrence_start_date: {
+              type: 'string',
+              format: 'date',
+              description: 'Data início recorrência',
+              nullable: true,
+            },
+            installments: { $ref: '#/components/schemas/Installments' },
+            payment_method: {
+              type: 'string',
+              description: 'Método de pagamento',
+              nullable: true,
+            },
+          },
+        },
+        Installments: {
+          type: 'object',
+          required: ['totalInstallments', 'startDate'],
+          properties: {
+            totalInstallments: {
               type: 'integer',
-              description: 'ID do usuário proprietário',
+              description: 'Número total de parcelas',
+            },
+            startDate: {
+              type: 'string',
+              format: 'date',
+              description: 'Data da primeira parcela',
+            },
+            paidInstallments: {
+              type: 'integer',
+              description: 'Parcelas já pagas',
             },
           },
         },
@@ -267,6 +326,19 @@ const options: swaggerJsdoc.Options = {
   apis: ['./src/routes/*.ts'], // Caminho para os arquivos de rotas
 };
 
-const swaggerSpec = swaggerJsdoc(options);
+let swaggerSpec: any = {};
+try {
+  swaggerSpec = swaggerJsdoc(options);
+} catch (err) {
+  // Em caso de erro de parsing (JSDoc/Swagger inválido), registrar e exportar spec vazio
+  // Isso evita que a aplicação quebre durante desenvolvimento enquanto corrigimos os comentários.
+  // A documentação pode ser reabilitada quando os blocos JSDoc forem validados.
+  // eslint-disable-next-line no-console
+  console.warn(
+    'Swagger spec generation failed:',
+    err && (err as Error).message,
+  );
+  swaggerSpec = {};
+}
 
 export { swaggerUi, swaggerSpec };

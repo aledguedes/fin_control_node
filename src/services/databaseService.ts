@@ -218,25 +218,25 @@ export class DatabaseService {
       is_recurrent = false,
       recurrence_start_date,
       total_installments = 1,
+      paid_installments = 0,
       start_date,
       payment_method,
     } = transactionData;
 
     let installments_json = null;
-    if (is_installment) {
-      const installmentsData = {
-        totalInstallments: total_installments,
-        paidInstallments: 0,
-        startDate: start_date,
-      };
-      installments_json = JSON.stringify(installmentsData);
-    }
+
+    const installmentsData = {
+      totalInstallments: total_installments,
+      paidInstallments: paid_installments,
+      startDate: start_date,
+    };
+    installments_json = JSON.stringify(installmentsData);
 
     if (dbConfig.type === 'sqlite') {
       const result = this.querySQLite(
         `INSERT INTO tbl_transactions (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-        RETURNING *`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+         RETURNING *`,
         [
           description,
           amount,
@@ -381,7 +381,6 @@ export class DatabaseService {
     userId: string | number,
   ) {
     if (dbConfig.type === 'sqlite') {
-      // Primeiro verificar se a transação existe e pertence ao usuário
       const existing = await this.getFinancialTransactionById(id, userId);
       if (!existing || !existing.data) {
         return { data: null, error: { message: 'Transação não encontrada' } };
@@ -446,7 +445,7 @@ export class DatabaseService {
         .or(
           `and(is_installment.eq.false,is_recurrent.eq.false,transaction_date.gte.${startDate},transaction_date.lte.${endDate}),` +
             `and(is_recurrent.eq.true,recurrence_start_date.not.is.null,recurrence_start_date.lte.${endDate}),` +
-            `and(is_installment.eq.true,installments->>startDate.lte.${endDate})`,
+            `and(is_installment.eq.true,installments->>'startDate'.lte.${endDate})`,
         )
         .order('transaction_date', { ascending: true });
 

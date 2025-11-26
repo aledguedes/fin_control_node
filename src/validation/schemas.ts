@@ -32,15 +32,14 @@ export const transactionSchema = Joi.object({
       .required()
       .when('is_installment', {
         is: false,
-
         then: Joi.valid(1).required(),
       }),
+    paid_installments: Joi.number().integer().min(0).required(), // CAMPO INCLUÍDO
     start_date: Joi.date()
       .iso()
       .required()
       .when('is_installment', {
         is: false,
-
         then: Joi.valid(Joi.ref('transaction_date')).required(),
       }),
   }).required(),

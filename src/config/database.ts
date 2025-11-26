@@ -121,12 +121,14 @@ class DatabaseManager {
         installment_number INTEGER DEFAULT 1,
         total_installments INTEGER DEFAULT 1,
         parent_transaction_id TEXT,
+        paid_installments INTEGER DEFAULT 0,
         start_date DATE,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (category_id) REFERENCES tbl_financial_categories(id) ON DELETE RESTRICT,
         FOREIGN KEY (user_id) REFERENCES tbl_users(id) ON DELETE CASCADE
       );
+
 
       CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON tbl_transactions(user_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_category_id ON tbl_transactions(category_id);

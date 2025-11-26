@@ -1,12 +1,13 @@
 ﻿import express from 'express';
 import { DatabaseService } from '../services/databaseService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
-import { validateRequest, validateQuery } from '../validation';
 import {
   transactionSchema,
   financialCategorySchema,
   monthlyViewQuerySchema,
 } from '../validation/schemas';
+import { validateRequest, validateQuery } from '../validation/index';
+import { normalizeTransactionPayload } from '../middleware/normalizeTransactionPayload';
 import { createError } from '../middleware/errorHandler';
 import { parseISO, addMonths, getDate, isBefore } from 'date-fns';
 
@@ -135,33 +136,28 @@ router.post(
  * /financial/transactions:
  *   get:
  *     summary: Listar transações
- *     description: Retorna todas as transações financeiras do usuário com filtros opcionais
  *     tags:
- *       - "Financeiro - Transações"
+ *       - Financeiro - Transações
  *     parameters:
  *       - in: query
  *         name: start_date
  *         schema:
  *           type: string
  *           format: date
- *         description: Data inicial do filtro (YYYY-MM-DD)
- *         example: 2024-01-01
+ *         description: Data inicial (YYYY-MM-DD)
  *       - in: query
  *         name: end_date
  *         schema:
  *           type: string
  *           format: date
- *         description: Data final do filtro (YYYY-MM-DD)
- *         example: 2024-12-31
+ *         description: Data final (YYYY-MM-DD)
  *       - in: query
  *         name: category_id
  *         schema:
  *           type: string
- *           format: uuid
  *         description: ID da categoria para filtrar
- *         example: e5f99ce8-5a2e-45f9-809a-cd67cdfbc3e2
  *     responses:
- *       200:
+ *       '200':
  *         description: Lista de transações retornada com sucesso
  *         content:
  *           application/json:
@@ -171,8 +167,8 @@ router.post(
  *                 transactions:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/Transaction'
- *       500:
+ *                     $ref: '#/components/schemas/TransactionResponse'
+ *       '500':
  *         description: Erro ao buscar transações
  *         content:
  *           application/json:
@@ -214,9 +210,8 @@ router.get(
  * /financial/transactions:
  *   post:
  *     summary: Criar transação
- *     description: Cria uma nova transação financeira para o usuário autenticado, exigindo o corpo completo de dados (incluindo parcelamento).
  *     tags:
- *       - "Financeiro - Transações"
+ *       - Financeiro - Transações
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -224,62 +219,9 @@ router.get(
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - description
- *               - amount
- *               - type
- *               - category_id
- *               - transaction_date
- *               - is_installment
- *               - installments
- *             properties:
- *               description:
- *                 type: string
- *                 description: Descrição da transação
- *                 example: Compra de Notebook
- *               amount:
- *                 type: number
- *                 format: decimal
- *                 description: Valor total da transação (valor total da compra/dívida).
- *                 example: 3600.00
- *               type:
- *                 type: string
- *                 enum: [revenue, expense]
- *                 description: Tipo da transação
- *                 example: expense
- *               category_id:
- *                 type: string
- *                 format: uuid
- *                 description: ID da categoria
- *                 example: cb7262c8-33d6-4ffe-a9af-6a4b5a30264b
- *               transaction_date:
- *                 type: string
- *                 format: date
- *                 description: Data em que a transação ocorreu ou foi registrada (YYYY-MM-DD).
- *                 example: 2025-11-24
- *               is_installment:
- *                 type: boolean
- *                 description: Indica se a transação deve ser tratada como parcelada.
- *                 example: false
- *               installments:
- *                 type: object
- *                 description: Detalhes do parcelamento (obrigatório).
- *                 required:
- *                   - total_installments
- *                   - start_date
- *                 properties:
- *                   total_installments:
- *                     type: integer
- *                     description: Número total de parcelas (deve ser 1 se is_installment for false).
- *                     example: 1
- *                   start_date:
- *                     type: string
- *                     format: date
- *                     description: Data de vencimento da primeira parcela.
- *                     example: 2024-01-15
+ *             $ref: '#/components/schemas/TransactionCreate'
  *     responses:
- *       201:
+ *       '201':
  *         description: Transação criada com sucesso
  *         content:
  *           application/json:
@@ -287,17 +229,16 @@ router.get(
  *               type: object
  *               properties:
  *                 transaction:
- *                   $ref: '#/components/schemas/Transaction'
+ *                   $ref: '#/components/schemas/TransactionResponse'
  *                 message:
  *                   type: string
- *                   example: Transação criada com sucesso.
- *       400:
- *         description: Falha na validação de entrada (campos obrigatórios ausentes ou incorretos).
+ *       '400':
+ *         description: Falha na validação de entrada
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
- *       500:
+ *       '500':
  *         description: Erro interno ao criar transação
  *         content:
  *           application/json:
@@ -308,6 +249,7 @@ router.get(
 router.post(
   '/transactions',
   authenticateToken,
+  normalizeTransactionPayload,
   validateRequest(transactionSchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -319,12 +261,15 @@ router.post(
         category_id,
         transaction_date,
         is_installment,
+        is_recurrent,
+        recurrence_start_date,
         installments,
         payment_method,
       } = req.body;
 
-      const totalInstallments = installments?.total_installments || 1;
-      const startDate = installments?.start_date || transaction_date;
+      const totalInstallments = installments.total_installments;
+      const startDate = installments.start_date;
+      const paidInstallments = installments.paid_installments || 0;
 
       const result = await DatabaseService.createFinancialTransaction({
         description,
@@ -334,8 +279,11 @@ router.post(
         user_id: userId,
         transaction_date,
         is_installment: is_installment,
+        is_recurrent: is_recurrent || false,
+        recurrence_start_date,
         total_installments: totalInstallments,
         start_date: startDate,
+        paid_installments: paidInstallments,
         payment_method,
       });
 
@@ -415,7 +363,7 @@ router.post(
  *               type: object
  *               properties:
  *                 transaction:
- *                   $ref: '#/components/schemas/Transaction'
+ *                   $ref: '#/components/schemas/TransactionResponse'
  *       404:
  *         description: Transação não encontrada
  *         content:
@@ -555,7 +503,6 @@ router.delete(
  * /financial/summary/monthly-view:
  *   get:
  *     summary: Visão mensal consolidada
- *     description: Retorna uma visão consolidada de todas as transações (únicas e parcelas) para um mês/ano específico
  *     tags:
  *       - Financeiro - Sumários
  *     parameters:
@@ -564,8 +511,7 @@ router.delete(
  *         required: true
  *         schema:
  *           type: integer
- *         description: Ano da consulta
- *         example: 2024
+ *         description: "Ano da consulta (ex: 2024)"
  *       - in: query
  *         name: month
  *         required: true
@@ -574,9 +520,8 @@ router.delete(
  *           minimum: 1
  *           maximum: 12
  *         description: Mês da consulta (1-12)
- *         example: 1
  *     responses:
- *       200:
+ *       '200':
  *         description: Visão mensal retornada com sucesso
  *         content:
  *           application/json:
@@ -585,22 +530,19 @@ router.delete(
  *               properties:
  *                 year:
  *                   type: integer
- *                   description: Ano consultado
  *                 month:
  *                   type: integer
- *                   description: Mês consultado
  *                 transactions:
  *                   type: array
- *                   description: Lista de transações e parcelas do período
  *                   items:
  *                     type: object
- *       400:
+ *       '400':
  *         description: Parâmetros inválidos
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
- *       500:
+ *       '500':
  *         description: Erro ao buscar visão mensal
  *         content:
  *           application/json:
@@ -615,9 +557,8 @@ router.get(
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
-      const { year: qYear, month: qMonth } = req.query;
+      const { year: qYear, month: qMonth } = req.query; // Validar parâmetros (mantido por robustez, embora o Joi já faça)
 
-      // Validar parâmetros
       if (!qYear || !qMonth) {
         return next(
           createError('Parâmetros year e month são obrigatórios', 400),
@@ -629,9 +570,8 @@ router.get(
 
       if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
         return next(createError('Parâmetros year e month inválidos', 400));
-      }
+      } // CHAMA A FUNÇÃO CORRIGIDA DO BANCO DE DADOS (DatabaseService)
 
-      // CHAMA A FUNÇÃO CORRIGIDA DO BANCO DE DADOS (DatabaseService)
       const result = await DatabaseService.getMonthlyTransactions(
         userId,
         yearNum,
@@ -640,9 +580,8 @@ router.get(
 
       if (result?.error) {
         return next(createError('Erro ao buscar visão mensal', 500));
-      }
+      } // Processar transações para gerar entradas reais e virtuais:
 
-      // Processar transações para gerar entradas reais e virtuais:
       const transactions = result?.data || [];
       const monthlyView: any[] = [];
 
@@ -678,15 +617,13 @@ router.get(
           }
 
           if (!startDateStr) return; // pula malformados
-          const startDate = parseISO(startDateStr as string);
+          const startDate = parseISO(startDateStr as string); // Itera para gerar parcelas virtuais
 
-          // Itera para gerar parcelas virtuais
           for (let i = 1; i <= totalInstallments; i++) {
             const due = addMonths(startDate, i - 1);
             const dueYear = due.getFullYear();
-            const dueMonth = due.getMonth() + 1;
+            const dueMonth = due.getMonth() + 1; // Se o vencimento for no mês consultado, adiciona à view
 
-            // Se o vencimento for no mês consultado, adiciona à view
             if (dueYear === year && dueMonth === month) {
               monthlyView.push({
                 id: `${tx.id}_inst_${i}`,
@@ -703,9 +640,8 @@ router.get(
             }
           }
           return;
-        }
+        } // --- Lógica para Transações Recorrentes (Geração de Entrada Virtual) ---
 
-        // --- Lógica para Transações Recorrentes (Geração de Entrada Virtual) ---
         const isRecurrent = tx.is_recurrent === 1 || tx.is_recurrent === true;
         if (isRecurrent) {
           let recurrenceStart = tx.recurrence_start_date || null;
@@ -715,12 +651,10 @@ router.get(
           } catch {}
 
           if (!recurrenceStart) return;
-          const start = parseISO(recurrenceStart as string);
+          const start = parseISO(recurrenceStart as string); // Cria a data de ocorrência para o mês/ano consultado, mantendo o dia do mês de início // Note: month - 1 é porque Date usa 0-11 para meses
 
-          // Cria a data de ocorrência para o mês/ano consultado, mantendo o dia do mês de início
-          const occurrence = new Date(year, month - 1, getDate(start));
+          const occurrence = new Date(year, month - 1, getDate(start)); // Garante que a ocorrência não seja antes da data de início real da recorrência
 
-          // Garante que a ocorrência não seja antes da data de início real da recorrência
           if (isBefore(occurrence, start)) return;
 
           monthlyView.push({
@@ -733,10 +667,8 @@ router.get(
             isRecurrent: true,
           });
           return;
-        }
+        } // --- Lógica para Transações Únicas (Filtradas pelo DB) --- // A transação já foi filtrada pelo DB para cair no mês correto
 
-        // --- Lógica para Transações Únicas (Filtradas pelo DB) ---
-        // A transação já foi filtrada pelo DB para cair no mês correto (Regra 1)
         const txDate = tx.transaction_date || tx.date;
         if (txDate) {
           const parsed = parseISO(txDate);
@@ -755,12 +687,35 @@ router.get(
             });
           }
         }
+      }); // --- NOVO: Cálculo do Sumário Consolidado ---
+
+      let totalRevenue = 0;
+      let totalExpense = 0;
+
+      monthlyView.forEach((item) => {
+        // Certifica-se de que o valor é um número
+        const amount = parseFloat(item.amount || 0);
+        if (item.type === 'revenue') {
+          totalRevenue += amount;
+        } else if (item.type === 'expense') {
+          totalExpense += amount;
+        }
       });
+
+      const balance = totalRevenue - totalExpense;
+
+      const summary = {
+        // Arredonda para 2 casas decimais para evitar imprecisão de ponto flutuante
+        totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+        totalExpense: parseFloat(totalExpense.toFixed(2)),
+        balance: parseFloat(balance.toFixed(2)),
+      };
 
       res.json({
         year: yearNum,
         month: monthNum,
         transactions: monthlyView,
+        summary, // NOVO: Incluído o objeto summary
       });
     } catch (error) {
       next(error);
