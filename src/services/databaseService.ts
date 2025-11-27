@@ -86,18 +86,13 @@ export class DatabaseService {
       const { email, password_hash, password, full_name } = userData;
       const passwordToStore = password_hash || password;
       const result = this.querySQLite(
-        'INSERT INTO tbl_users (email, password, full_name) VALUES (?, ?, ?)',
-        [email, passwordToStore, full_name],
+        'INSERT INTO tbl_users (email, password) VALUES (?, ?) RETURNING *',
+        [email, passwordToStore],
       );
 
-      if (result && result.data) {
-        const userId = result.data.lastInsertRowid;
-        const newUser = this.querySQLite(
-          'SELECT * FROM tbl_users WHERE id = ?',
-          [userId],
-        );
+      if (result && result.length > 0) {
         return {
-          data: newUser && newUser.length > 0 ? newUser[0] : null,
+          data: result[0],
           error: null,
         };
       }
@@ -524,31 +519,6 @@ export class DatabaseService {
     }
   }
 
-  static async createShoppingList(listData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { name, user_id } = listData;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_shopping_lists (name, user_id) VALUES (?, ?)',
-        [name, user_id],
-      );
-
-      if (result && result.data) {
-        const listId = result.data.lastInsertRowid;
-        const newList = this.querySQLite(
-          'SELECT * FROM tbl_shopping_lists WHERE id = ?',
-          [listId],
-        );
-        return {
-          data: newList && newList.length > 0 ? newList[0] : null,
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar lista' } };
-    } else {
-      return await this.querySupabase('tbl_shopping_lists', 'insert', listData);
-    }
-  }
-
   static async getShoppingListById(
     id: string | number,
     userId: string | number,
@@ -616,7 +586,7 @@ export class DatabaseService {
 
       // Excluir itens da lista primeiro
       this.querySQLite(
-        'DELETE FROM tbl_shopping_items WHERE shopping_list_id = ?',
+        'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
         [id],
       );
 
@@ -676,7 +646,7 @@ export class DatabaseService {
     } else {
       // Para Supabase, calcular total e atualizar
       const itemsResult = await db
-        .from('tbl_shopping_items')
+        .from('tbl_shopping_list_items')
         .select('quantity, price')
         .eq('shopping_list_id', id);
 
@@ -704,50 +674,59 @@ export class DatabaseService {
     if (dbConfig.type === 'sqlite') {
       const sql = `
         SELECT si.*, p.name as product_name, sc.name as category_name 
-        FROM tbl_shopping_items si
+        FROM tbl_shopping_list_items si
         LEFT JOIN tbl_products p ON si.product_id = p.id
-        LEFT JOIN tbl_shopping_categories sc ON si.category_id = sc.id
+        LEFT JOIN tbl_shopping_categories sc ON p.category_id = sc.id
         WHERE si.shopping_list_id = ?
       `;
       const result = this.querySQLite(sql, [listId]);
       return { data: result, error: null };
     } else {
       const result = await db
-        .from('tbl_shopping_items')
+        .from('tbl_shopping_list_items')
         .select(
           `*, 
-          tbl_products(name) as product_name, 
-          tbl_shopping_categories(name) as category_name
+          tbl_products(name, category_id), 
+          category:tbl_products(tbl_shopping_categories(name))
         `,
         )
         .eq('shopping_list_id', listId);
-      return { data: result.data, error: result.error };
+      // Transform result to match expected format if needed, or just return
+      // Simpler Supabase query if relations are set up:
+      // But for now let's just fix table name
+      const result2 = await db
+        .from('tbl_shopping_list_items')
+        .select(
+          `*, 
+          tbl_products(name)
+        `,
+        )
+        .eq('shopping_list_id', listId);
+      return { data: result2.data, error: result2.error };
     }
   }
 
   static async createShoppingItem(itemData: any) {
     if (dbConfig.type === 'sqlite') {
-      const { quantity, shopping_list_id, product_id, category_id, user_id } =
-        itemData;
+      const { quantity, price, shopping_list_id, product_id } = itemData;
       const result = this.querySQLite(
-        'INSERT INTO tbl_shopping_items (quantity, shopping_list_id, product_id, category_id, user_id) VALUES (?, ?, ?, ?, ?)',
-        [quantity, shopping_list_id, product_id, category_id, user_id],
+        'INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id) VALUES (?, ?, ?, ?) RETURNING *',
+        [quantity, price || 0, shopping_list_id, product_id],
       );
 
-      if (result && result.data) {
-        const itemId = result.data.lastInsertRowid;
-        const newItem = this.querySQLite(
-          'SELECT * FROM tbl_shopping_items WHERE id = ?',
-          [itemId],
-        );
+      if (result && result.length > 0) {
         return {
-          data: newItem && newItem.length > 0 ? newItem[0] : null,
+          data: result[0],
           error: null,
         };
       }
       return { data: null, error: { message: 'Erro ao criar item' } };
     } else {
-      return await this.querySupabase('tbl_shopping_items', 'insert', itemData);
+      return await this.querySupabase(
+        'tbl_shopping_list_items',
+        'insert',
+        itemData,
+      );
     }
   }
 
@@ -767,7 +746,7 @@ export class DatabaseService {
       const { quantity, price, checked } = itemData;
 
       this.querySQLite(
-        `UPDATE tbl_shopping_items 
+        `UPDATE tbl_shopping_list_items 
          SET quantity = ?, price = ?, checked = ?
          WHERE id = ? AND shopping_list_id = ?`,
         [quantity, price, checked ? 1 : 0, itemId, listId],
@@ -775,7 +754,7 @@ export class DatabaseService {
 
       // Buscar item atualizado
       const updated = this.querySQLite(
-        'SELECT * FROM tbl_shopping_items WHERE id = ?',
+        'SELECT * FROM tbl_shopping_list_items WHERE id = ?',
         [itemId],
       );
 
@@ -785,7 +764,7 @@ export class DatabaseService {
       };
     } else {
       return await this.querySupabase(
-        'tbl_shopping_items',
+        'tbl_shopping_list_items',
         'update',
         itemData,
         { id: itemId, shopping_list_id: listId },
@@ -806,16 +785,21 @@ export class DatabaseService {
       }
 
       this.querySQLite(
-        'DELETE FROM tbl_shopping_items WHERE id = ? AND shopping_list_id = ?',
+        'DELETE FROM tbl_shopping_list_items WHERE id = ? AND shopping_list_id = ?',
         [itemId, listId],
       );
 
       return { data: { success: true }, error: null };
     } else {
-      return await this.querySupabase('tbl_shopping_items', 'delete', null, {
-        id: itemId,
-        shopping_list_id: listId,
-      });
+      return await this.querySupabase(
+        'tbl_shopping_list_items',
+        'delete',
+        null,
+        {
+          id: itemId,
+          shopping_list_id: listId,
+        },
+      );
     }
   }
 
@@ -836,20 +820,15 @@ export class DatabaseService {
 
   static async createProduct(productData: any) {
     if (dbConfig.type === 'sqlite') {
-      const { name, unit, user_id } = productData;
+      const { name, unit, user_id, category_id } = productData;
       const result = this.querySQLite(
-        'INSERT INTO tbl_products (name, unit, user_id) VALUES (?, ?, ?)',
-        [name, unit, user_id],
+        'INSERT INTO tbl_products (name, unit, user_id, category_id) VALUES (?, ?, ?, ?) RETURNING *',
+        [name, unit, user_id, category_id],
       );
 
-      if (result && result.data) {
-        const productId = result.data.lastInsertRowid;
-        const newProduct = this.querySQLite(
-          'SELECT * FROM tbl_products WHERE id = ?',
-          [productId],
-        );
+      if (result && result.length > 0) {
         return {
-          data: newProduct && newProduct.length > 0 ? newProduct[0] : null,
+          data: result[0],
           error: null,
         };
       }
@@ -919,14 +898,14 @@ export class DatabaseService {
   static async checkProductDependencies(id: string | number) {
     if (dbConfig.type === 'sqlite') {
       const result = this.querySQLite(
-        'SELECT COUNT(*) as count FROM tbl_shopping_items WHERE product_id = ?',
+        'SELECT COUNT(*) as count FROM tbl_shopping_list_items WHERE product_id = ?',
         [id],
       );
       const count = result && result.length > 0 ? result[0].count : 0;
       return { data: { hasDependencies: count > 0, count }, error: null };
     } else {
       const result = await db
-        .from('tbl_shopping_items')
+        .from('tbl_shopping_list_items')
         .select('id', { count: 'exact' })
         .eq('product_id', id);
 
@@ -1010,18 +989,13 @@ export class DatabaseService {
     if (dbConfig.type === 'sqlite') {
       const { name, user_id } = categoryData;
       const result = this.querySQLite(
-        'INSERT INTO tbl_shopping_categories (name, user_id) VALUES (?, ?)',
+        'INSERT INTO tbl_shopping_categories (name, user_id) VALUES (?, ?) RETURNING *',
         [name, user_id],
       );
 
-      if (result && result.data) {
-        const categoryId = result.data.lastInsertRowid;
-        const newCategory = this.querySQLite(
-          'SELECT * FROM tbl_shopping_categories WHERE id = ?',
-          [categoryId],
-        );
+      if (result && result.length > 0) {
         return {
-          data: newCategory && newCategory.length > 0 ? newCategory[0] : null,
+          data: result[0],
           error: null,
         };
       }
@@ -1191,12 +1165,170 @@ export class DatabaseService {
     }
   }
 
-  // Getter para config
+  static async createShoppingList(listData: any) {
+    const { name, items = [], user_id } = listData;
+
+    if (dbConfig.type === 'sqlite') {
+      try {
+        this.querySQLite(
+          `INSERT INTO tbl_shopping_lists (name, user_id, status, created_at)
+         VALUES (?, ?, 'andamento', datetime('now'))`,
+          [name, user_id],
+        );
+
+        const listResult = this.querySQLite(
+          `SELECT * FROM tbl_shopping_lists WHERE rowid = last_insert_rowid()`,
+        );
+
+        if (!listResult || listResult.length === 0) {
+          return { data: null, error: { message: 'Erro ao criar lista' } };
+        }
+
+        const list = listResult[0];
+
+        if (!items || items.length === 0) {
+          return { data: { ...list, items: [] }, error: null };
+        }
+
+        const createdItems: any[] = [];
+
+        for (const product_id of items) {
+          const productCheck = this.querySQLite(
+            `SELECT * FROM tbl_products WHERE id = ? AND user_id = ?`,
+            [product_id, user_id],
+          );
+
+          if (!productCheck || productCheck.length === 0) {
+            this.querySQLite(
+              'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
+              [list.id],
+            );
+            this.querySQLite('DELETE FROM tbl_shopping_lists WHERE id = ?', [
+              list.id,
+            ]);
+
+            return {
+              data: null,
+              error: { message: `Produto não encontrado: ${product_id}` },
+            };
+          }
+
+          this.querySQLite(
+            `INSERT INTO tbl_shopping_list_items
+           (shopping_list_id, product_id, quantity, price, checked)
+           VALUES (?, ?, 1, 0.01, 0)`,
+            [list.id, product_id],
+          );
+
+          const itemResult = this.querySQLite(
+            `SELECT * FROM tbl_shopping_list_items WHERE rowid = last_insert_rowid()`,
+          );
+
+          if (!itemResult || itemResult.length === 0) {
+            this.querySQLite(
+              'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
+              [list.id],
+            );
+            this.querySQLite('DELETE FROM tbl_shopping_lists WHERE id = ?', [
+              list.id,
+            ]);
+
+            return { data: null, error: { message: 'Erro ao criar item' } };
+          }
+
+          createdItems.push(itemResult[0]);
+        }
+
+        return { data: { ...list, items: createdItems }, error: null };
+      } catch (error) {
+        return { data: null, error: { message: 'Erro ao criar lista' } };
+      }
+    }
+
+    const listInsert = await this.querySupabase(
+      'tbl_shopping_lists',
+      'insert',
+      {
+        name,
+        user_id,
+        status: 'andamento',
+        created_at: new Date().toISOString(),
+      },
+    );
+
+    if (!listInsert || listInsert.error || !listInsert.data?.[0]) {
+      return {
+        data: null,
+        error: listInsert?.error ?? { message: 'Erro ao criar lista' },
+      };
+    }
+
+    const list = listInsert.data[0];
+
+    if (!items || items.length === 0) {
+      return { data: { ...list, items: [] }, error: null };
+    }
+
+    for (const product_id of items) {
+      const productCheck = await this.querySupabase(
+        'tbl_products',
+        'select',
+        null,
+        { id: product_id, user_id },
+      );
+
+      if (
+        !productCheck ||
+        !productCheck.data ||
+        productCheck.data.length === 0
+      ) {
+        await this.querySupabase('tbl_shopping_lists', 'delete', null, {
+          id: list.id,
+          user_id,
+        });
+
+        return {
+          data: null,
+          error: { message: `Produto não encontrado: ${product_id}` },
+        };
+      }
+    }
+
+    const supabaseInsertItems = await this.querySupabase(
+      'tbl_shopping_list_items',
+      'insert',
+      items.map((product_id: string) => ({
+        shopping_list_id: list.id,
+        product_id,
+        quantity: 1,
+        price: 0,
+        checked: false,
+        user_id,
+      })),
+    );
+
+    if (!supabaseInsertItems || supabaseInsertItems.error) {
+      await this.querySupabase('tbl_shopping_lists', 'delete', null, {
+        id: list.id,
+        user_id,
+      });
+
+      return {
+        data: null,
+        error: supabaseInsertItems?.error ?? { message: 'Erro ao criar itens' },
+      };
+    }
+
+    return {
+      data: { ...list, items: supabaseInsertItems.data || [] },
+      error: null,
+    };
+  }
+
   static getConfig() {
     return dbConfig;
   }
 
-  // Getter para database
   static getDatabase() {
     return db;
   }

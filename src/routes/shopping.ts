@@ -2,6 +2,7 @@ import express from 'express';
 import { DatabaseService } from '../services/databaseService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../validation';
+import { normalizeProductPayload } from '../middleware/normalizeProductPayload';
 
 import {
   shoppingListSchema,
@@ -65,7 +66,7 @@ router.get(
  * /shopping/lists:
  *   post:
  *     summary: Criar lista de compras
- *     description: Cria uma nova lista de compras para o usuário autenticado
+ *     description: Cria uma nova lista de compras com itens opcionais vinculados ao usuário autenticado
  *     tags:
  *       - Compras - Listas
  *     requestBody:
@@ -80,7 +81,17 @@ router.get(
  *               name:
  *                 type: string
  *                 description: Nome da lista
- *                 example: Compras do mês
+ *                 example: Compras da Semana
+ *               items:
+ *                 type: array
+ *                 description: Lista opcional de IDs de produtos para adicionar na criação
+ *                 items:
+ *                   type: string
+ *                   example: prod_123
+ *                 example:
+ *                   - prod_id_1
+ *                   - prod_id_4
+ *                   - prod_id_7
  *     responses:
  *       201:
  *         description: Lista criada com sucesso
@@ -89,8 +100,24 @@ router.get(
  *             schema:
  *               type: object
  *               properties:
- *                 list:
- *                   $ref: '#/components/schemas/ShoppingList'
+ *                 id:
+ *                   type: string
+ *                 name:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *                 createdAt:
+ *                   type: string
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ShoppingListItem'
+ *       400:
+ *         description: Erro de validação na entrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Erro ao criar lista
  *         content:
@@ -106,19 +133,33 @@ router.post(
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
-      const { name } = req.body;
+      const { name, items } = req.body;
 
-      // Implementação simplificada - criar diretamente
+      if (!name || typeof name !== 'string' || name.trim() === '') {
+        return res
+          .status(400)
+          .json({ error: 'O nome da lista é obrigatório.' });
+      }
+      if (items && !Array.isArray(items)) {
+        return res
+          .status(400)
+          .json({ error: 'O campo items deve ser um array.' });
+      }
+
       const result = await DatabaseService.createShoppingList({
         name,
+        items,
         user_id: userId,
       });
-
+      console.log(result);
       if (result?.error) {
+        if (result.error.message?.includes('Produto não encontrado')) {
+          return res.status(400).json({ error: result.error.message });
+        }
         return next(createError('Erro ao criar lista', 500));
       }
 
-      res.status(201).json({ list: result?.data });
+      res.status(201).json(result.data);
     } catch (error) {
       next(error);
     }
@@ -293,14 +334,16 @@ router.post(
 router.post(
   '/products',
   authenticateToken,
+  normalizeProductPayload,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
-      const { name, unit } = req.body;
+      const { name, unit, category_id } = req.body;
 
       const result = await DatabaseService.createProduct({
         name,
         unit,
+        category_id,
         user_id: userId,
       });
 
@@ -328,7 +371,7 @@ router.post(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *         description: ID da lista de compras
  *     responses:
  *       200:

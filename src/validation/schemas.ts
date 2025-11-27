@@ -52,6 +52,7 @@ export const financialCategorySchema = Joi.object({
 
 export const shoppingListSchema = Joi.object({
   name: Joi.string().min(1).max(200).required(),
+  items: Joi.array().items(Joi.string().uuid()).optional(),
 });
 
 export const shoppingListItemSchema = Joi.object({
