@@ -279,6 +279,12 @@ const options: swaggerJsdoc.Options = {
               type: 'integer',
               description: 'ID do usuário proprietário',
             },
+            items: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/ShoppingListItem',
+              },
+            },
           },
         },
         ShoppingItem: {
@@ -312,6 +318,34 @@ const options: swaggerJsdoc.Options = {
             product_id: {
               type: 'integer',
               description: 'ID do produto',
+            },
+          },
+        },
+        ShoppingListItem: {
+          type: 'object',
+          required: ['quantity', 'productId'],
+          properties: {
+            quantity: {
+              type: 'number',
+              description: 'Quantidade do produto.',
+              example: 2,
+            },
+            price: {
+              type: 'number',
+              format: 'decimal',
+              description: 'Preço unitário do produto.',
+              default: 0,
+            },
+            productId: {
+              type: 'string',
+              description: 'ID do produto ao qual o item está ligado.',
+              example: 'c6f3e0c0-f8d2-4d2a-8c0e-4b7f8e3c8d5a',
+            },
+            checked: {
+              type: 'boolean',
+              description:
+                'Indica se o item foi marcado como comprado/checado.',
+              default: false,
             },
           },
         },

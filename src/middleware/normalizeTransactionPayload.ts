@@ -23,17 +23,19 @@ export function normalizeTransactionPayload(
   ];
   for (const key of Object.keys(req.body)) {
     if (forbiddenCamelCase.includes(key)) {
-      return res.status(400).json({
+      res.status(400).json({
         error: `Atributo '${key}' deve estar em snake_case (ex: payment_method)`,
       });
+      return;
     }
   }
   if (req.body.installments && typeof req.body.installments === 'object') {
     for (const key of Object.keys(req.body.installments)) {
       if (forbiddenCamelCase.includes(key)) {
-        return res.status(400).json({
+        res.status(400).json({
           error: `Atributo installments.${key} deve estar em snake_case (ex: total_installments)`,
         });
+        return;
       }
     }
   }

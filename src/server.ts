@@ -33,26 +33,60 @@ console.log(
   }`,
 );
 
+// Configuração de CORS
+// Lista de origens permitidas (pode ser configurada via variável de ambiente)
+const allowedOrigins = process.env['ALLOWED_ORIGINS']
+  ? process.env['ALLOWED_ORIGINS'].split(',').map((origin) => origin.trim())
+  : [
+      'http://localhost:3000', // Backend (se necessário)
+      'http://localhost:4200', // Frontend Angular (desenvolvimento)
+      'http://localhost:5173', // Frontend Vite (desenvolvimento)
+      // Adicione outras URLs conforme necessário
+    ];
+
+const corsOptions = {
+  origin: function (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void,
+  ) {
+    // Permite requisições sem 'origin' (ex: Postman, apps mobile, curl)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Se ALLOW_ALL_ORIGINS estiver definido como 'true', permite qualquer origem
+    if (process.env['ALLOW_ALL_ORIGINS'] === 'true') {
+      return callback(null, true);
+    }
+
+    // Verifica se a origem está na lista de permitidas
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(
+        `⚠️  CORS bloqueou requisição de origem não permitida: ${origin}`,
+      );
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
 // Middlewares de segurança
 app.use(helmet());
-app.use(
-  cors({
-    // Durante testes, permitir qualquer origem. Usar função para refletir
-    // o origin recebido (funciona com `credentials: true`). Em produção,
-    // defina `FRONTEND_URL` no ambiente e remova/reforce essa opção.
-    origin: (origin, callback) => callback(null, true),
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'Accept',
-      'Origin',
-      'X-Requested-With',
-    ],
-    credentials: true,
-    optionsSuccessStatus: 200,
-  }),
-);
+app.use(cors(corsOptions));
+
+// Habilita o pre-flight para todas as rotas
+app.options('*', cors(corsOptions));
 
 // Middlewares de parsing
 app.use(express.json({ limit: '10mb' }));

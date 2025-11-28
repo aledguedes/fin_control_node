@@ -17,9 +17,10 @@ export function normalizeProductPayload(
   const forbiddenCamelCase = ['categoryId'];
   for (const key of Object.keys(req.body)) {
     if (forbiddenCamelCase.includes(key)) {
-      return res.status(400).json({
+      res.status(400).json({
         error: `Atributo '${key}' deve estar em snake_case (ex: category_id)`,
       });
+      return;
     }
   }
   next();

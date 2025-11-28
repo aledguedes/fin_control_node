@@ -150,10 +150,6 @@ router.post(
  *                 format: email
  *                 description: E-mail do usuário
  *                 example: usuario@exemplo.com
- *               username:
- *                 type: string
- *                 description: Nome de usuário (alternativa ao email)
- *                 example: usuario@exemplo.com
  *               password:
  *                 type: string
  *                 format: password

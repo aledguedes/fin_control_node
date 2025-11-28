@@ -610,41 +610,84 @@ export class DatabaseService {
     userId: string | number,
   ) {
     if (dbConfig.type === 'sqlite') {
-      // Primeiro verificar se a lista existe e pertence ao usuário
-      const existing = await this.getShoppingListById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
+      const transaction = db.transaction(() => {
+        // 1. Verificar se a lista existe e pertence ao usuário
+        const listCheck = db
+          .prepare(
+            'SELECT * FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
+          )
+          .get(id, userId);
+
+        if (!listCheck) {
+          throw new Error('Lista não encontrada');
+        }
+
+        // 2. Calcular total da lista
+        const items = db
+          .prepare(
+            'SELECT * FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
+          )
+          .all(id);
+
+        const totalAmount = items.reduce((sum: number, item: any) => {
+          return sum + (item.quantity || 0) * (item.price || 0);
+        }, 0);
+
+        const completedAt = new Date().toISOString().split('T')[0];
+
+        // 3. Atualizar lista
+        db.prepare(
+          `UPDATE tbl_shopping_lists 
+           SET status = 'finalizada', completed_at = ?, total_amount = ?
+           WHERE id = ? AND user_id = ?`,
+        ).run(completedAt, totalAmount, id, userId);
+
+        // 4. Criar transação financeira
+        const description = `Compras: ${listCheck.name || 'Lista'}`;
+        const installmentsData = {
+          totalInstallments: 1,
+          paidInstallments: 1,
+          startDate: completedAt,
+        };
+        const installmentsJson = JSON.stringify(installmentsData);
+
+        db.prepare(
+          `INSERT INTO tbl_transactions (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          description,
+          totalAmount,
+          'expense',
+          null, // category_id
+          userId,
+          completedAt, // transaction_date
+          0, // is_installment
+          1, // total_installments
+          1, // installment_number
+          completedAt, // start_date
+          installmentsJson, // installments
+          0, // is_recurrent
+          null, // recurrence_start_date
+          null, // payment_method
+        );
+
+        // Retornar lista atualizada
+        return db
+          .prepare('SELECT * FROM tbl_shopping_lists WHERE id = ?')
+          .get(id);
+      });
+
+      try {
+        const updatedList = transaction();
+        return { data: updatedList, error: null };
+      } catch (error: any) {
+        return {
+          data: null,
+          error: { message: error.message || 'Erro ao finalizar lista' },
+        };
       }
-
-      // Calcular total da lista
-      const itemsResult = await this.getShoppingItems(id);
-      const items = itemsResult.data || [];
-      const totalAmount = items.reduce((sum: number, item: any) => {
-        return sum + (item.quantity || 0) * (item.price || 0);
-      }, 0);
-
-      const completedAt = new Date().toISOString().split('T')[0];
-
-      // Atualizar lista
-      this.querySQLite(
-        `UPDATE tbl_shopping_lists 
-         SET status = 'finalizada', completed_at = ?, total_amount = ?
-         WHERE id = ? AND user_id = ?`,
-        [completedAt, totalAmount, id, userId],
-      );
-
-      // Buscar lista atualizada
-      const updated = this.querySQLite(
-        'SELECT * FROM tbl_shopping_lists WHERE id = ?',
-        [id],
-      );
-
-      return {
-        data: updated && updated.length > 0 ? updated[0] : null,
-        error: null,
-      };
     } else {
-      // Para Supabase, calcular total e atualizar
+      // Para Supabase, manter lógica anterior (não atômica entre serviços, mas funcional)
       const itemsResult = await db
         .from('tbl_shopping_list_items')
         .select('quantity, price')
@@ -657,7 +700,7 @@ export class DatabaseService {
 
       const completedAt = new Date().toISOString().split('T')[0];
 
-      return await this.querySupabase(
+      const updateResult = await this.querySupabase(
         'tbl_shopping_lists',
         'update',
         {
@@ -667,6 +710,10 @@ export class DatabaseService {
         },
         { id, user_id: userId },
       );
+
+      // Nota: No Supabase, a transação financeira será criada pelo controller chamando createFinancialTransaction
+      // pois não temos transaction cross-service fácil aqui sem RPC.
+      return updateResult;
     }
   }
 
@@ -800,6 +847,143 @@ export class DatabaseService {
           shopping_list_id: listId,
         },
       );
+    }
+  }
+
+  static async syncShoppingList(
+    listId: string | number,
+    userId: string | number,
+    listData: any,
+  ) {
+    if (dbConfig.type === 'sqlite') {
+      const { list } = listData;
+      const { name, items, status } = list;
+
+      console.log(name, items, status);
+
+      const syncTransaction = db.transaction(() => {
+        // 1. Verify list ownership
+        const listCheck = db
+          .prepare(
+            'SELECT id FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
+          )
+          .get(listId, userId);
+        if (!listCheck) {
+          throw new Error('Lista não encontrada');
+        }
+
+        // 2. Update list details
+        if (name || status) {
+          const updateStmt = db.prepare(`
+             UPDATE tbl_shopping_lists
+             SET name = COALESCE(?, name),
+                 status = COALESCE(?, status)
+             WHERE id = ?
+           `);
+          updateStmt.run(name || null, status || null, listId);
+        }
+
+        // 3. Replace items
+        // Delete existing
+        db.prepare(
+          'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
+        ).run(listId);
+
+        // Insert new
+        if (items && Array.isArray(items) && items.length > 0) {
+          const insertStmt = db.prepare(`
+            INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id, checked)
+            VALUES (?, ?, ?, ?, ?)
+          `);
+          for (const item of items) {
+            insertStmt.run(
+              item.quantity,
+              item.price || 0,
+              listId,
+              item.productId || item.product_id,
+              item.checked ? 1 : 0,
+            );
+          }
+        }
+
+        // Return updated list
+        return db
+          .prepare('SELECT * FROM tbl_shopping_lists WHERE id = ?')
+          .get(listId);
+      });
+
+      try {
+        const result = syncTransaction();
+        // Fetch items to return complete object
+        const itemsResult = await this.getShoppingItems(listId);
+        return { data: { ...result, items: itemsResult.data }, error: null };
+      } catch (error: any) {
+        return {
+          data: null,
+          error: { message: error.message || 'Erro na sincronização' },
+        };
+      }
+    } else {
+      return {
+        data: null,
+        error: { message: 'Sincronização não implementada para Supabase' },
+      };
+    }
+  }
+
+  static async addBatchShoppingItems(
+    listId: string | number,
+    userId: string | number,
+    items: any[],
+  ) {
+    if (dbConfig.type === 'sqlite') {
+      const batchTransaction = db.transaction(() => {
+        // 1. Verify list ownership
+        const listCheck = db
+          .prepare(
+            'SELECT id FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
+          )
+          .get(listId, userId);
+        if (!listCheck) {
+          throw new Error('Lista não encontrada');
+        }
+
+        // 2. Insert items
+        const insertStmt = db.prepare(`
+          INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id, checked)
+          VALUES (?, ?, ?, ?, ?)
+        `);
+
+        for (const item of items) {
+          insertStmt.run(
+            item.quantity,
+            item.price || 0,
+            listId,
+            item.productId || item.product_id,
+            item.checked ? 1 : 0,
+          );
+        }
+
+        return true;
+      });
+
+      try {
+        batchTransaction();
+        const itemsResult = await this.getShoppingItems(listId);
+        return { data: { items: itemsResult.data }, error: null };
+      } catch (error: any) {
+        return {
+          data: null,
+          error: {
+            message: error.message || 'Erro ao adicionar itens em lote',
+          },
+        };
+      }
+    } else {
+      return {
+        data: null,
+        error: { message: 'Batch insert não implementado para Supabase' },
+      };
     }
   }
 
@@ -1216,7 +1400,7 @@ export class DatabaseService {
           this.querySQLite(
             `INSERT INTO tbl_shopping_list_items
            (shopping_list_id, product_id, quantity, price, checked)
-           VALUES (?, ?, 1, 0.01, 0)`,
+           VALUES (?, ?, 1, 0.00, 0)`,
             [list.id, product_id],
           );
 

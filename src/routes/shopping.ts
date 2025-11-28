@@ -427,6 +427,69 @@ router.get(
 /**
  * @swagger
  * /shopping/lists/{id}:
+ *   put:
+ *     summary: Sincronizar lista completa
+ *     description: Atualiza a lista e substitui todos os itens (Sincronização)
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID da lista
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ShoppingList'
+ *     responses:
+ *       200:
+ *         description: Lista sincronizada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ShoppingList'
+ *       500:
+ *         description: Erro ao sincronizar lista
+ */
+router.put(
+  '/lists/:id',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
+      const listData = req.body;
+
+      if (!id) {
+        return next(createError('ID da lista é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.syncShoppingList(
+        id,
+        userId,
+        listData,
+      );
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Lista não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({ list: result?.data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * @swagger
+ * /shopping/lists/{id}:
  *   delete:
  *     summary: Excluir lista
  *     description: Exclui uma lista de compras e todos os seus itens
@@ -550,34 +613,7 @@ router.post(
         return next(createError(result.error.message, statusCode));
       }
 
-      // Cria transação financeira (expense) referente à lista finalizada
-      const completedList = result?.data;
-      if (completedList) {
-        const description = `Compras: ${completedList.name || 'Lista'}`;
-        const amount = completedList.total_amount || 0;
-        const transactionResult =
-          await DatabaseService.createFinancialTransaction({
-            description,
-            amount,
-            type: 'expense',
-            category_id: null,
-            user_id: userId,
-            transaction_date:
-              completedList.completed_at ||
-              new Date().toISOString().split('T')[0],
-            is_installment: false,
-            total_installments: 1,
-            start_date:
-              completedList.completed_at ||
-              new Date().toISOString().split('T')[0],
-          });
-        if (transactionResult?.error) {
-          return next(createError('Erro ao criar transação financeira', 500));
-        }
-        res.json({ list: completedList, transaction: transactionResult?.data });
-        return;
-      }
-      // Caso não haja lista (deveria não acontecer), apenas retorna a lista
+      // Transação financeira já criada atomicamente pelo service
       res.json({ list: result?.data });
     } catch (error) {
       next(error);
@@ -650,44 +686,59 @@ router.post(
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// Adicionar item à lista
+// Adicionar item à lista (Suporta lote ou individual)
 router.post(
   '/lists/:listId/items',
   authenticateToken,
-  validateRequest(shoppingListItemSchema),
+  // validateRequest(shoppingListItemSchema), // Removido para suportar array
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
       const { listId } = req.params;
-      const { quantity, price, product_id, category_id } = req.body;
 
       if (!listId) {
         return next(createError('ID da lista é obrigatório', 400));
       }
 
-      // Verificar se a lista existe e pertence ao usuário
-      const listCheck = await DatabaseService.getShoppingListById(
-        listId,
-        userId,
-      );
-      if (!listCheck || !listCheck.data) {
-        return next(createError('Lista não encontrada', 404));
+      if (Array.isArray(req.body)) {
+        // Batch mode
+        const result = await DatabaseService.addBatchShoppingItems(
+          listId,
+          userId,
+          req.body,
+        );
+        if (result?.error) {
+          return next(createError(result.error.message, 500));
+        }
+        res.status(201).json(result.data);
+      } else {
+        // Legacy single item mode
+        const { quantity, price, product_id, category_id } = req.body;
+
+        // Verificar se a lista existe e pertence ao usuário
+        const listCheck = await DatabaseService.getShoppingListById(
+          listId,
+          userId,
+        );
+        if (!listCheck || !listCheck.data) {
+          return next(createError('Lista não encontrada', 404));
+        }
+
+        const result = await DatabaseService.createShoppingItem({
+          quantity,
+          price: price || 0,
+          shopping_list_id: listId,
+          product_id,
+          category_id,
+          user_id: userId,
+        });
+
+        if (result?.error) {
+          return next(createError('Erro ao criar item', 500));
+        }
+
+        res.status(201).json({ item: result?.data });
       }
-
-      const result = await DatabaseService.createShoppingItem({
-        quantity,
-        price: price || 0,
-        shopping_list_id: listId,
-        product_id,
-        category_id,
-        user_id: userId,
-      });
-
-      if (result?.error) {
-        return next(createError('Erro ao criar item', 500));
-      }
-
-      res.status(201).json({ item: result?.data });
     } catch (error) {
       next(error);
     }
