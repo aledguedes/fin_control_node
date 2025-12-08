@@ -559,7 +559,7 @@ router.delete(
  * /shopping/lists/{id}/complete:
  *   post:
  *     summary: Finalizar lista
- *     description: Marca uma lista de compras como finalizada e calcula o valor total
+ *     description: Marca uma lista de compras como completed e calcula o valor total
  *     tags:
  *       - Compras - Listas
  *     parameters:
@@ -571,7 +571,7 @@ router.delete(
  *         description: ID da lista de compras
  *     responses:
  *       200:
- *         description: Lista finalizada com sucesso
+ *         description: Lista completed com sucesso
  *         content:
  *           application/json:
  *             schema:
@@ -593,11 +593,15 @@ router.delete(
  *               $ref: '#/components/schemas/Error'
  */
 // Finalizar lista
-router.post(
+router.put(
+  // Alterado para PUT, mais adequado para atualização/sincronização
   '/lists/:id/complete',
   authenticateToken,
   async (req: AuthenticatedRequest, res, next) => {
     try {
+      // Dados de cabeçalho da lista enviados pelo front-end (opcional)
+      const listPayload = req.body;
+
       const userId = req.user!.userId;
       const { id } = req.params;
 
@@ -605,15 +609,18 @@ router.post(
         return next(createError('ID da lista é obrigatório', 400));
       }
 
-      const result = await DatabaseService.completeShoppingList(id, userId);
+      const result = await DatabaseService.completeShoppingList(
+        id,
+        userId,
+        listPayload,
+      );
 
       if (result?.error) {
         const statusCode =
           result.error.message === 'Lista não encontrada' ? 404 : 500;
         return next(createError(result.error.message, statusCode));
-      }
+      } // Transação financeira já criada atomicamente pelo service
 
-      // Transação financeira já criada atomicamente pelo service
       res.json({ list: result?.data });
     } catch (error) {
       next(error);

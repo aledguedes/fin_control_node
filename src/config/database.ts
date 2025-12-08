@@ -174,7 +174,7 @@ class DatabaseManager {
       CREATE TABLE IF NOT EXISTS tbl_shopping_lists (
         id TEXT PRIMARY KEY DEFAULT (gen_random_uuid()),
         name TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'andamento' CHECK (status IN ('andamento', 'finalizada')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         completed_at TEXT,
         total_amount DECIMAL(10,2),
@@ -191,7 +191,7 @@ class DatabaseManager {
       CREATE TABLE IF NOT EXISTS tbl_shopping_list_items (
         id TEXT PRIMARY KEY DEFAULT (gen_random_uuid()),
         quantity DECIMAL(10,3) NOT NULL CHECK (quantity > 0),
-        price DECIMAL(10,2) NOT NULL CHECK (price > 0),
+        price DECIMAL(10,2) NOT NULL CHECK (price >= 0),
         checked BOOLEAN DEFAULT 0,
         shopping_list_id TEXT NOT NULL,
         product_id TEXT NOT NULL,

@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS tbl_shopping_lists (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(200) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'andamento' CHECK (status IN ('andamento', 'finalizada')),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   completed_at TIMESTAMP WITH TIME ZONE,
   total_amount DECIMAL(10,2),

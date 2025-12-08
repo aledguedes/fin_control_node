@@ -254,9 +254,9 @@ const options: swaggerJsdoc.Options = {
             },
             status: {
               type: 'string',
-              enum: ['andamento', 'finalizada'],
+              enum: ['pending', 'completed'],
               description: 'Status da lista',
-              default: 'andamento',
+              default: 'pending',
             },
             created_at: {
               type: 'string',

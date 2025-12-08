@@ -55,6 +55,34 @@ export const shoppingListSchema = Joi.object({
   items: Joi.array().items(Joi.string().uuid()).optional(),
 });
 
+// Este schema define a estrutura completa de um item individual dentro do array 'items'
+export const fullShoppingListItemSchema = Joi.object({
+  id: Joi.string().uuid().required(),
+  quantity: Joi.number().positive().required(),
+  price: Joi.number().min(0).required(), // Ajustado para aceitar 0
+  checked: Joi.boolean().required(),
+  productId: Joi.string().uuid().required(),
+  shoppingListId: Joi.string().uuid().required(),
+  name: Joi.string().min(1).required(),
+  categoryId: Joi.string().uuid().required(),
+  unit: Joi.string().valid('un', 'kg', 'l', 'dz', 'm', 'cx').required(),
+  createdAt: Joi.date().iso().required(),
+  updatedAt: Joi.date().iso().required(),
+}).required();
+
+// Este schema define a estrutura do JSON COMPLETO enviado pelo frontend
+export const fullShoppingListPayloadSchema = Joi.object({
+  id: Joi.string().uuid().required(),
+  name: Joi.string().min(1).max(200).required(),
+  status: Joi.string().valid('pending', 'completed').required(),
+  created_at: Joi.date().iso().required(),
+  completed_at: Joi.date().iso().allow(null), // Pode ser nulo
+  total_amount: Joi.number().min(0).allow(null), // Pode ser nulo
+  user_id: Joi.string().uuid().required(),
+  // O campo 'items' usa o schema de item detalhado criado acima
+  items: Joi.array().items(fullShoppingListItemSchema).min(0).required(),
+}).required();
+
 export const shoppingListItemSchema = Joi.object({
   quantity: Joi.number().positive().required(),
   price: Joi.number().positive().required(),

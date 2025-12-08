@@ -605,13 +605,15 @@ export class DatabaseService {
     }
   }
 
+  //
+
   static async completeShoppingList(
     id: string | number,
     userId: string | number,
+    listPayload: any,
   ) {
     if (dbConfig.type === 'sqlite') {
       const transaction = db.transaction(() => {
-        // 1. Verificar se a lista existe e pertence ao usuário
         const listCheck = db
           .prepare(
             'SELECT * FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
@@ -622,10 +624,27 @@ export class DatabaseService {
           throw new Error('Lista não encontrada');
         }
 
-        // 2. Calcular total da lista
+        if (listPayload && Array.isArray(listPayload.items)) {
+          const updateItemStmt = db.prepare(
+            `UPDATE tbl_shopping_list_items 
+                    SET quantity = ?, price = ?, checked = ?
+                    WHERE id = ? AND shopping_list_id = ?`,
+          );
+
+          for (const item of listPayload.items) {
+            updateItemStmt.run(
+              item.quantity,
+              item.price,
+              item.checked ? 1 : 0,
+              item.id,
+              id,
+            );
+          }
+        }
+
         const items = db
           .prepare(
-            'SELECT * FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
+            'SELECT quantity, price FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
           )
           .all(id);
 
@@ -635,14 +654,25 @@ export class DatabaseService {
 
         const completedAt = new Date().toISOString().split('T')[0];
 
-        // 3. Atualizar lista
         db.prepare(
           `UPDATE tbl_shopping_lists 
-           SET status = 'finalizada', completed_at = ?, total_amount = ?
-           WHERE id = ? AND user_id = ?`,
+                SET status = 'completed', completed_at = ?, total_amount = ?
+                WHERE id = ? AND user_id = ?`,
         ).run(completedAt, totalAmount, id, userId);
 
-        // 4. Criar transação financeira
+        const category = db
+          .prepare(
+            'SELECT id FROM tbl_financial_categories WHERE name = ? AND user_id = ? AND type = ?',
+          )
+          .get('Alimentação', userId, 'expense');
+
+        if (!category) {
+          throw new Error(
+            'Categoria "Alimentação" não encontrada para o usuário.',
+          );
+        }
+        const categoryId = category.id;
+
         const description = `Compras: ${listCheck.name || 'Lista'}`;
         const installmentsData = {
           totalInstallments: 1,
@@ -652,26 +682,26 @@ export class DatabaseService {
         const installmentsJson = JSON.stringify(installmentsData);
 
         db.prepare(
-          `INSERT INTO tbl_transactions (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tbl_transactions 
+                (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           description,
           totalAmount,
           'expense',
-          null, // category_id
+          categoryId,
           userId,
-          completedAt, // transaction_date
-          0, // is_installment
-          1, // total_installments
-          1, // installment_number
-          completedAt, // start_date
-          installmentsJson, // installments
-          0, // is_recurrent
-          null, // recurrence_start_date
-          null, // payment_method
+          completedAt,
+          0,
+          1,
+          1,
+          completedAt,
+          installmentsJson,
+          0,
+          null,
+          null,
         );
 
-        // Retornar lista atualizada
         return db
           .prepare('SELECT * FROM tbl_shopping_lists WHERE id = ?')
           .get(id);
@@ -687,11 +717,50 @@ export class DatabaseService {
         };
       }
     } else {
-      // Para Supabase, manter lógica anterior (não atômica entre serviços, mas funcional)
-      const itemsResult = await db
-        .from('tbl_shopping_list_items')
-        .select('quantity, price')
-        .eq('shopping_list_id', id);
+      const listCheckResult = await this.querySupabase(
+        'tbl_shopping_lists',
+        'select',
+        'name',
+        { id, user_id: userId },
+      );
+
+      if (
+        !listCheckResult ||
+        !listCheckResult.data ||
+        listCheckResult.data.length === 0
+      ) {
+        return { data: null, error: { message: 'Lista não encontrada' } };
+      }
+      const listName = listCheckResult.data[0].name;
+
+      if (listPayload && Array.isArray(listPayload.items)) {
+        for (const item of listPayload.items) {
+          await this.querySupabase(
+            'tbl_shopping_list_items',
+            'update',
+            {
+              quantity: item.quantity,
+              price: item.price,
+              checked: item.checked,
+            },
+            { id: item.id, shopping_list_id: id },
+          );
+        }
+      }
+
+      const itemsResult = await this.querySupabase(
+        'tbl_shopping_list_items',
+        'select',
+        'quantity, price',
+        { shopping_list_id: id },
+      );
+
+      if (!itemsResult) {
+        return {
+          data: null,
+          error: { message: 'Erro ao buscar itens da lista para cálculo.' },
+        };
+      }
 
       const items = itemsResult.data || [];
       const totalAmount = items.reduce((sum: number, item: any) => {
@@ -700,20 +769,62 @@ export class DatabaseService {
 
       const completedAt = new Date().toISOString().split('T')[0];
 
-      const updateResult = await this.querySupabase(
+      await this.querySupabase(
         'tbl_shopping_lists',
         'update',
         {
-          status: 'finalizada',
+          status: 'completed',
           completed_at: completedAt,
           total_amount: totalAmount,
         },
         { id, user_id: userId },
       );
 
-      // Nota: No Supabase, a transação financeira será criada pelo controller chamando createFinancialTransaction
-      // pois não temos transaction cross-service fácil aqui sem RPC.
-      return updateResult;
+      const categoryResult = await this.querySupabase(
+        'tbl_financial_categories',
+        'select',
+        'id',
+        { name: 'Alimentação', user_id: userId, type: 'expense' },
+      );
+
+      if (
+        !categoryResult ||
+        !categoryResult.data ||
+        categoryResult.data.length === 0
+      ) {
+        return {
+          data: null,
+          error: {
+            message: 'Categoria "Alimentação" não encontrada para o usuário.',
+          },
+        };
+      }
+      const categoryId = categoryResult.data[0].id;
+
+      const finalResult = await this.querySupabase(
+        'tbl_shopping_lists',
+        'select',
+        '*',
+        { id, user_id: userId },
+      );
+
+      if (!finalResult || !finalResult.data || finalResult.data.length === 0) {
+        return {
+          data: null,
+          error: { message: 'Erro ao buscar lista atualizada após conclusão.' },
+        };
+      }
+
+      return {
+        data: {
+          ...finalResult.data[0],
+          totalAmount,
+          listName,
+          completedAt,
+          categoryId,
+        },
+        error: null,
+      };
     }
   }
 
@@ -856,8 +967,7 @@ export class DatabaseService {
     listData: any,
   ) {
     if (dbConfig.type === 'sqlite') {
-      const { list } = listData;
-      const { name, items, status } = list;
+      const { name, items, status } = listData;
 
       console.log(name, items, status);
 
@@ -1356,7 +1466,7 @@ export class DatabaseService {
       try {
         this.querySQLite(
           `INSERT INTO tbl_shopping_lists (name, user_id, status, created_at)
-         VALUES (?, ?, 'andamento', datetime('now'))`,
+         VALUES (?, ?, 'pending', datetime('now'))`,
           [name, user_id],
         );
 
@@ -1435,7 +1545,7 @@ export class DatabaseService {
       {
         name,
         user_id,
-        status: 'andamento',
+        status: 'pending',
         created_at: new Date().toISOString(),
       },
     );

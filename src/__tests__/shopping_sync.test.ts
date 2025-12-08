@@ -118,7 +118,7 @@ describe('Shopping List Sync and Batch Operations', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    expect(res.body.list.status).toBe('finalizada');
+    expect(res.body.list.status).toBe('completed');
     expect(res.body.list.total_amount).toBe(100); // (5*10) + (2.5*20) = 50 + 50 = 100
 
     // Verify transaction exists in DB (via API or direct DB check if possible, but API is better)
