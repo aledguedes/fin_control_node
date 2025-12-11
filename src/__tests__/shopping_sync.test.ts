@@ -80,7 +80,7 @@ describe('Shopping List Sync and Batch Operations', () => {
     );
     expect(item1).toBeDefined();
     expect(item1.quantity).toBe(5);
-    expect(item1.checked).toBe(1); // SQLite boolean is 0/1
+    expect(item1.checked).toBe(true); // SQLite boolean is 0/1, Supabase is true/false
 
     const item2 = res.body.list.items.find(
       (i: any) => i.product_id === product2Id,

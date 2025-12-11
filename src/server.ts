@@ -1,7 +1,17 @@
+// IMPORTANTE: Carregar variáveis de ambiente ANTES de qualquer importação que dependa delas
+import dotenv from 'dotenv';
+
+const envFile =
+  process.env['NODE_ENV'] === 'production'
+    ? '.env.production'
+    : process.env['NODE_ENV'] === 'test'
+    ? '.env.test'
+    : '.env.development';
+dotenv.config({ path: envFile });
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 
 import authRoutes from './routes/auth';
 import financialRoutes from './routes/financial';
@@ -11,27 +21,12 @@ import { requestLogger } from './middleware/requestLogger';
 import { databaseManager } from './config/database';
 import { swaggerUi, swaggerSpec } from './config/swagger';
 
-// Carregar variáveis de ambiente baseado no NODE_ENV
-const envFile =
-  process.env['NODE_ENV'] === 'production'
-    ? '.env.production'
-    : process.env['NODE_ENV'] === 'test'
-    ? '.env.test'
-    : '.env.development';
-dotenv.config({ path: envFile });
-
 const app = express();
 const PORT = process.env['PORT'] || 3000;
 
 // Obter configuração do banco de dados
 const dbConfigInfo = databaseManager.getConfig();
-console.log(
-  `📊 Banco de dados: ${
-    dbConfigInfo.type === 'sqlite'
-      ? 'SQLite (Desenvolvimento)'
-      : 'Supabase (Produção)'
-  }`,
-);
+console.log(`📊 Banco de dados: Supabase`);
 
 // Configuração de CORS
 // Lista de origens permitidas (pode ser configurada via variável de ambiente)
@@ -39,6 +34,7 @@ const allowedOrigins = process.env['ALLOWED_ORIGINS']
   ? process.env['ALLOWED_ORIGINS'].split(',').map((origin) => origin.trim())
   : [
       'http://localhost:3000', // Backend (se necessário)
+      'http://localhost:3300', // Frontend (porta alternativa)
       'http://localhost:4200', // Frontend Angular (desenvolvimento)
       'http://localhost:5173', // Frontend Vite (desenvolvimento)
       // Adicione outras URLs conforme necessário
@@ -57,6 +53,14 @@ const corsOptions = {
     // Se ALLOW_ALL_ORIGINS estiver definido como 'true', permite qualquer origem
     if (process.env['ALLOW_ALL_ORIGINS'] === 'true') {
       return callback(null, true);
+    }
+
+    // Em desenvolvimento, permite qualquer localhost com qualquer porta
+    if (process.env['NODE_ENV'] === 'development') {
+      const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+      if (localhostRegex.test(origin)) {
+        return callback(null, true);
+      }
     }
 
     // Verifica se a origem está na lista de permitidas
@@ -133,7 +137,10 @@ if (process.env['NODE_ENV'] !== 'test') {
 }
 
 // Exportar instância do banco de dados para uso nas rotas
-export const db = databaseManager.getDatabase();
-export const dbConfig = databaseManager.getConfig();
+// export const db = databaseManager.getDatabase();
+// export const dbConfig = databaseManager.getConfig();
+// REMOVIDO: Acesso direto deve ser feito via DatabaseService ou importando databaseManager se necessário,
+// mas o ideal é que o service encapsule isso. O DatabaseService original importava daqui.
+// Como mudamos o DatabaseService para importar de config/database, não precisamos mais exportar aqui.
 
 export default app;

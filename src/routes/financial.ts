@@ -800,7 +800,13 @@ router.get(
       const result = await DatabaseService.getInstallmentPlans(userId);
 
       if (result?.error) {
-        return next(createError('Erro ao buscar planos de parcelamento', 500));
+        console.error('Erro ao buscar planos de parcelamento:', result.error);
+        return next(
+          createError(
+            `Erro ao buscar planos de parcelamento: ${result.error.message || JSON.stringify(result.error)}`,
+            500,
+          ),
+        );
       }
 
       const transactions = result?.data || [];
