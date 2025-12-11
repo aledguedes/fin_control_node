@@ -549,6 +549,20 @@ router.delete(
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+// Função auxiliar para normalizar installments (Supabase retorna JSONB como objeto, SQLite como string)
+function parseInstallments(installments: any): any {
+  if (!installments) return null;
+  if (typeof installments === 'object') return installments; // Já é objeto (Supabase JSONB)
+  if (typeof installments === 'string') {
+    try {
+      return JSON.parse(installments); // String JSON (SQLite)
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 // Visão mensal consolidada
 router.get(
   '/summary/monthly-view',
@@ -591,30 +605,23 @@ router.get(
       transactions.forEach((tx: any) => {
         // --- Lógica para Transações Parceladas (Geração de Parcelas Virtuais) ---
         // Normaliza campos que podem ser armazenados como JSON ou colunas
+        const installmentsData = parseInstallments(tx.installments);
         const isInstallment =
           tx.is_installment === 1 ||
           tx.is_installment === true ||
-          (tx.installments &&
-            JSON.parse(tx.installments)?.totalInstallments > 1);
+          (installmentsData && installmentsData.totalInstallments > 1);
 
-        const totalInstallments = (() => {
-          try {
-            const j = tx.installments ? JSON.parse(tx.installments) : null;
-            return j?.totalInstallments || 1;
-          } catch {
-            return 1;
-          }
-        })();
+        const totalInstallments =
+          installmentsData?.totalInstallments ||
+          tx.total_installments ||
+          1;
 
         if (isInstallment && totalInstallments > 1) {
           // Determina a data de início da primeira parcela
-          let startDateStr = tx.start_date || tx.transaction_date;
-          try {
-            const j = tx.installments ? JSON.parse(tx.installments) : null;
-            if (j?.startDate) startDateStr = j.startDate;
-          } catch {
-            // ignora erros de parse
-          }
+          let startDateStr =
+            tx.start_date ||
+            tx.transaction_date ||
+            installmentsData?.startDate;
 
           if (!startDateStr) return; // pula malformados
           const startDate = parseISO(startDateStr as string); // Itera para gerar parcelas virtuais
@@ -644,11 +651,11 @@ router.get(
 
         const isRecurrent = tx.is_recurrent === 1 || tx.is_recurrent === true;
         if (isRecurrent) {
-          let recurrenceStart = tx.recurrence_start_date || null;
-          try {
-            const j = tx.installments ? JSON.parse(tx.installments) : null;
-            if (!recurrenceStart && j?.startDate) recurrenceStart = j.startDate;
-          } catch {}
+          const installmentsDataRecurrent = parseInstallments(tx.installments);
+          let recurrenceStart =
+            tx.recurrence_start_date ||
+            installmentsDataRecurrent?.startDate ||
+            null;
 
           if (!recurrenceStart) return;
           const start = parseISO(recurrenceStart as string); // Cria a data de ocorrência para o mês/ano consultado, mantendo o dia do mês de início // Note: month - 1 é porque Date usa 0-11 para meses
@@ -823,18 +830,12 @@ router.get(
           transaction.transaction_date || transaction.start_date,
         );
         const totalInstallments = transaction.total_installments || 1;
-        const paidInstallments = (() => {
-          try {
-            const j = transaction.installments
-              ? JSON.parse(transaction.installments)
-              : null;
-            return (
-              j?.paidInstallments ?? (transaction.installment_number - 1 || 0)
-            );
-          } catch {
-            return transaction.installment_number - 1 || 0;
-          }
-        })();
+        const installmentsDataPlan = parseInstallments(transaction.installments);
+        const paidInstallments =
+          installmentsDataPlan?.paidInstallments ??
+          (transaction.installment_number && transaction.installment_number > 0
+            ? transaction.installment_number - 1
+            : 0);
 
         const remainingInstallments = Math.max(
           0,

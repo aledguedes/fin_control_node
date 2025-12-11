@@ -244,14 +244,21 @@ export class DatabaseService {
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${monthStr}-${lastDay}`;
 
+    // Para parcelamentos, precisamos buscar todos que podem ter parcelas no mês consultado
+    // Buscamos todos os parcelamentos ativos (onde ainda há parcelas a pagar)
+    // O código JavaScript calculará quais parcelas específicas caem no mês consultado
     const result = await db
       .from('tbl_transactions')
       .select('*')
       .eq('user_id', userId)
       .or(
+        // Transações únicas no mês
         `and(is_installment.eq.false,is_recurrent.eq.false,transaction_date.gte.${startDate},transaction_date.lte.${endDate}),` +
+          // Transações recorrentes que começaram antes ou durante o mês
           `and(is_recurrent.eq.true,recurrence_start_date.not.is.null,recurrence_start_date.lte.${endDate}),` +
-          `and(is_installment.eq.true,installments->>'startDate'.lte.${endDate})`,
+          // Parcelamentos: busca todos os parcelamentos ativos
+          // O filtro por mês será feito no código JavaScript ao calcular as parcelas
+          `is_installment.eq.true`,
       )
       .order('transaction_date', { ascending: true });
 
