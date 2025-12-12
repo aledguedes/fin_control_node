@@ -79,7 +79,8 @@ export class DatabaseService {
     const result = await db
       .from('tbl_financial_categories')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
     return { data: result.data, error: result.error };
   }
 
@@ -328,7 +329,8 @@ export class DatabaseService {
     const result = await db
       .from('tbl_shopping_lists')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
     return { data: result.data, error: result.error };
   }
 
@@ -710,7 +712,8 @@ export class DatabaseService {
     const result = await db
       .from('tbl_products')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
     return { data: result.data, error: result.error };
   }
 
@@ -792,7 +795,8 @@ export class DatabaseService {
     const result = await db
       .from('tbl_shopping_categories')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
     return { data: result.data, error: result.error };
   }
 

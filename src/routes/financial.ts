@@ -9,6 +9,7 @@ import {
 import { validateRequest, validateQuery } from '../validation/index';
 import { normalizeTransactionPayload } from '../middleware/normalizeTransactionPayload';
 import { createError } from '../middleware/errorHandler';
+import { cacheMiddleware, invalidateCache } from '../middleware/cache';
 import { parseISO, addMonths, getDate, isBefore } from 'date-fns';
 
 const router = express.Router();
@@ -44,6 +45,7 @@ const router = express.Router();
 router.get(
   '/categories',
   authenticateToken,
+  cacheMiddleware({ maxAge: 600 }), // 10 minutos - categorias mudam pouco
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -108,6 +110,7 @@ router.get(
 router.post(
   '/categories',
   authenticateToken,
+  invalidateCache,
   validateRequest(financialCategorySchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -179,6 +182,7 @@ router.post(
 router.get(
   '/transactions',
   authenticateToken,
+  cacheMiddleware({ maxAge: 180 }), // 3 minutos - dados mais dinâmicos
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -249,6 +253,7 @@ router.get(
 router.post(
   '/transactions',
   authenticateToken,
+  invalidateCache,
   normalizeTransactionPayload,
   validateRequest(transactionSchema),
   async (req: AuthenticatedRequest, res, next) => {
@@ -381,6 +386,7 @@ router.post(
 router.put(
   '/transactions/:id',
   authenticateToken,
+  invalidateCache,
   validateRequest(transactionSchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -471,6 +477,7 @@ router.put(
 router.delete(
   '/transactions/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -567,6 +574,7 @@ function parseInstallments(installments: any): any {
 router.get(
   '/summary/monthly-view',
   authenticateToken,
+  cacheMiddleware({ maxAge: 60 }), // 1 minuto - dados calculados podem mudar
   validateQuery(monthlyViewQuerySchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -800,6 +808,7 @@ router.get(
 router.get(
   '/summary/installment-plans',
   authenticateToken,
+  cacheMiddleware({ maxAge: 180 }), // 3 minutos
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
