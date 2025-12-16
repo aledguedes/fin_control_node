@@ -87,6 +87,13 @@ Desktop.ini
 
 # Render deployment
 .render/
+DEPLOY.md
+DEPLOY_MCP.md
+
+# Documentation files
+API_INTERFACES.md
+CONFIGURACAO.md
+CORS_CONFIG.md
 
 # Temporary files
 *.tmp

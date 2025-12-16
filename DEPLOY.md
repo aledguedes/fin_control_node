@@ -8,6 +8,25 @@ Este documento contém as instruções para fazer deploy da aplicação no Rende
 2. Repositório Git (GitHub, GitLab ou Bitbucket) com o código commitado
 3. Projeto Supabase configurado e migrations executadas
 
+## ⚠️ Verificação Rápida - Erro Comum
+
+Se você está vendo o erro:
+
+```
+Error: Cannot find module '/opt/render/project/src/dist/server.js'
+```
+
+**SOLUÇÃO IMEDIATA:**
+
+1. Acesse o [Dashboard do Render](https://dashboard.render.com)
+2. Selecione seu serviço `my-fin-control-backend`
+3. Vá em **Settings** > **Advanced**
+4. No campo **Root Directory**, **REMOVA QUALQUER VALOR** (deixe completamente vazio)
+5. Clique em **Save Changes**
+6. Vá em **Manual Deploy** > **Deploy latest commit**
+
+O Root Directory **DEVE ESTAR VAZIO**. Se estiver configurado como `src`, o Render procura o arquivo no lugar errado.
+
 ## Configuração no Render.com
 
 ### 1. Criar Novo Web Service
@@ -25,11 +44,23 @@ O arquivo `render.yaml` já está configurado, mas você pode ajustar manualment
 - **Environment**: `Node`
 - **Region**: `Oregon` (ou a região mais próxima)
 - **Branch**: `main` (ou sua branch principal)
-- **Root Directory**: ⚠️ **DEVE ESTAR VAZIO** (não coloque `src` aqui!)
+- **Root Directory**: ⚠️ **DEVE ESTAR COMPLETAMENTE VAZIO** (não coloque `src` ou qualquer outro valor aqui!)
 - **Build Command**: `npm install && npm run build`
 - **Start Command**: `node dist/server.js` (ou `npm start`)
 
-⚠️ **IMPORTANTE**: Se você configurou manualmente no painel do Render e colocou `src` no campo "Root Directory", remova isso! O Root Directory deve estar **vazio** para que o build funcione corretamente.
+⚠️ **CRÍTICO - ERRO COMUM**:
+
+O erro `Cannot find module '/opt/render/project/src/dist/server.js'` indica que o **Root Directory** está configurado como `src` no painel do Render.
+
+**SOLUÇÃO:**
+
+1. Acesse o painel do Render
+2. Vá em **Settings** > **Advanced**
+3. No campo **Root Directory**, **REMOVA QUALQUER VALOR** (deixe completamente vazio)
+4. Salve as alterações
+5. Faça um novo deploy
+
+O Root Directory **DEVE ESTAR VAZIO** para que o build funcione corretamente. Quando configurado como `src`, o Render muda o diretório de trabalho e o caminho `dist/server.js` não é encontrado.
 
 ### 3. Variáveis de Ambiente
 
@@ -102,10 +133,15 @@ O Render está configurado para usar o endpoint `/health` como health check. Cer
 
 - Verifique os logs no Render
 - Verifique se a porta está sendo lida corretamente (deve usar `process.env.PORT`)
-- **Erro "Cannot find module '/opt/render/project/src/dist/server.js'**:
-  - Isso indica que o "Root Directory" está configurado como `src` no painel do Render
-  - Vá em Settings > Advanced e remova qualquer valor do campo "Root Directory"
-  - O Root Directory deve estar **completamente vazio**
+- **Erro "Cannot find module '/opt/render/project/src/dist/server.js'"**:
+  - ✅ **CAUSA**: O "Root Directory" está configurado como `src` no painel do Render
+  - ✅ **SOLUÇÃO**:
+    1. Vá em **Settings** > **Advanced** no painel do Render
+    2. Remova **QUALQUER VALOR** do campo "Root Directory" (deixe completamente vazio)
+    3. Salve as alterações
+    4. Faça um novo deploy manual ou aguarde o próximo deploy automático
+  - O Root Directory deve estar **completamente vazio** (sem espaços, sem `src`, sem nada)
+  - O arquivo `render.yaml` não define Root Directory, então qualquer valor configurado manualmente no painel está causando o problema
 
 ## Comandos Úteis
 
