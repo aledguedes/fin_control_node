@@ -1348,4 +1348,125 @@ router.delete(
   },
 );
 
+/**
+ * @swagger
+ * /shopping/cleanup-orphaned-transactions:
+ *   post:
+ *     summary: Limpar transações órfãs
+ *     description: Remove transações financeiras de listas de compras que foram deletadas
+ *     tags:
+ *       - Compras - Listas
+ *     responses:
+ *       200:
+ *         description: Limpeza executada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 deletedCount:
+ *                   type: number
+ *       500:
+ *         description: Erro ao executar limpeza
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Limpar transações órfãs (transações de listas deletadas)
+router.post(
+  '/cleanup-orphaned-transactions',
+  authenticateToken,
+  invalidateCache,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const result = await DatabaseService.cleanupOrphanedShoppingTransactions(
+        userId,
+      );
+
+      if (result?.error) {
+        return next(createError(result.error.message, 500));
+      }
+
+      res.json({
+        message: result.data?.message || 'Limpeza concluída',
+        deletedCount: result.data?.deletedCount || 0,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * @swagger
+ * /shopping/transactions/{transactionId}:
+ *   delete:
+ *     summary: Deletar transação de compras específica
+ *     description: Remove uma transação financeira específica de compras por ID
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: transactionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID da transação a ser deletada
+ *     responses:
+ *       200:
+ *         description: Transação deletada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *       404:
+ *         description: Transação não encontrada
+ *       500:
+ *         description: Erro ao deletar transação
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Deletar transação específica de compras
+router.delete(
+  '/transactions/:transactionId',
+  authenticateToken,
+  invalidateCache,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { transactionId } = req.params;
+
+      if (!transactionId) {
+        return next(createError('ID da transação é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.deleteShoppingTransaction(
+        transactionId,
+        userId,
+      );
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Transação não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({
+        message: result.data?.message || 'Transação deletada com sucesso',
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 export default router;

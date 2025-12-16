@@ -330,7 +330,7 @@ export class DatabaseService {
       .from('tbl_shopping_lists')
       .select('*')
       .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false }); // Usar created_at pois updated_at não existe na tabela
     return { data: result.data, error: result.error };
   }
 
@@ -403,13 +403,312 @@ export class DatabaseService {
     id: string | number,
     userId: string | number,
   ) {
+    // 1. Verificar se a lista existe e obter informações
+    const listResult = await db
+      .from('tbl_shopping_lists')
+      .select('name, status')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (!listResult.data) {
+      return {
+        data: null,
+        error: { message: 'Lista não encontrada' },
+      };
+    }
+
+    const listName = listResult.data.name;
+    const listStatus = listResult.data.status;
+
+    // 2. Se a lista estiver completada, remover a transação relacionada
+    if (listStatus === 'completed') {
+      const description = `Compras: ${listName || 'Lista'}`;
+
+      // Buscar e deletar a transação relacionada
+      const transactionResult = await db
+        .from('tbl_transactions')
+        .delete()
+        .eq('description', description)
+        .eq('user_id', userId)
+        .eq('type', 'expense');
+
+      if (transactionResult.error) {
+        console.error(
+          'Erro ao deletar transação relacionada:',
+          transactionResult.error,
+        );
+        // Continua mesmo se houver erro ao deletar a transação
+      }
+    }
+
+    // 3. Deletar a lista
     const result = await db
       .from('tbl_shopping_lists')
       .delete()
       .eq('id', id)
       .eq('user_id', userId);
+
     console.log('deleteShoppingList result:', result);
     return { data: { success: !result.error }, error: result.error };
+  }
+
+  /**
+   * Remove transações órfãs (transações de listas de compras que foram deletadas)
+   */
+  static async cleanupOrphanedShoppingTransactions(userId: string | number) {
+    try {
+      console.log('Iniciando limpeza de transações órfãs para userId:', userId);
+
+      // 1. Buscar todas as transações do tipo expense do usuário
+      // Vamos buscar todas e filtrar por descrição em JavaScript para evitar problemas com .like()
+      const transactionsResult = await db
+        .from('tbl_transactions')
+        .select('id, description')
+        .eq('user_id', userId)
+        .eq('type', 'expense');
+
+      if (transactionsResult.error) {
+        console.error('Erro ao buscar transações:', transactionsResult.error);
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao buscar transações',
+            details: transactionsResult.error,
+          },
+        };
+      }
+
+      // Filtrar apenas transações que começam com "Compras:"
+      const transactions = (transactionsResult.data || []).filter((tx: any) =>
+        tx.description?.startsWith('Compras:'),
+      );
+
+      console.log(
+        `Encontradas ${transactions.length} transação(ões) de compras`,
+      );
+
+      if (transactions.length === 0) {
+        return {
+          data: {
+            deletedCount: 0,
+            message: 'Nenhuma transação de compras encontrada',
+          },
+          error: null,
+        };
+      }
+
+      // 2. Buscar todas as listas de compras do usuário (não apenas completadas,
+      // pois uma lista pode ter sido deletada após ser completada)
+      const listsResult = await db
+        .from('tbl_shopping_lists')
+        .select('name')
+        .eq('user_id', userId);
+
+      if (listsResult.error) {
+        console.error('Erro ao buscar listas:', listsResult.error);
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao buscar listas de compras',
+            details: listsResult.error,
+          },
+        };
+      }
+
+      const existingLists = (listsResult.data || []).map(
+        (list: any) => list.name,
+      );
+      console.log(
+        `Encontradas ${existingLists.length} lista(s) de compras existente(s)`,
+      );
+
+      // 3. Normalizar nomes das listas para comparação (lowercase, trim, remover espaços extras)
+      const normalizeName = (name: string) => {
+        return name.toLowerCase().trim().replace(/\s+/g, ' '); // Remove espaços múltiplos
+      };
+
+      const normalizedExistingLists = existingLists.map(normalizeName);
+      console.log('Listas existentes normalizadas:', normalizedExistingLists);
+
+      // 4. Identificar transações órfãs
+      const orphanedTransactions: string[] = [];
+
+      for (const transaction of transactions) {
+        // Extrair o nome da lista da descrição (formato: "Compras: Nome da Lista")
+        const listName = transaction.description
+          .replace(/^Compras:\s*/i, '') // Case-insensitive
+          .trim();
+
+        const normalizedListName = normalizeName(listName);
+
+        console.log(
+          `Verificando transação: "${transaction.description}" -> Nome extraído: "${listName}" -> Normalizado: "${normalizedListName}"`,
+        );
+
+        // Se não encontrar uma lista correspondente (comparação normalizada), é uma transação órfã
+        if (!normalizedExistingLists.includes(normalizedListName)) {
+          orphanedTransactions.push(transaction.id);
+          console.log(
+            `✓ Transação órfã encontrada: ID=${transaction.id}, Descrição="${transaction.description}", Nome extraído="${listName}"`,
+          );
+        } else {
+          console.log(
+            `✓ Transação válida (lista encontrada): ID=${transaction.id}, Descrição="${transaction.description}"`,
+          );
+        }
+      }
+
+      if (orphanedTransactions.length === 0) {
+        return {
+          data: {
+            deletedCount: 0,
+            message: 'Nenhuma transação órfã encontrada',
+          },
+          error: null,
+        };
+      }
+
+      console.log(
+        `Preparando para deletar ${orphanedTransactions.length} transação(ões) órfã(s)`,
+      );
+      console.log('IDs das transações órfãs:', orphanedTransactions);
+
+      // 5. Deletar transações órfãs uma por uma para garantir que funcione
+      let deletedCount = 0;
+      const errors: any[] = [];
+
+      for (const transactionId of orphanedTransactions) {
+        const deleteResult = await db
+          .from('tbl_transactions')
+          .delete()
+          .eq('id', transactionId)
+          .eq('user_id', userId);
+
+        if (deleteResult.error) {
+          console.error(
+            `Erro ao deletar transação ${transactionId}:`,
+            deleteResult.error,
+          );
+          errors.push({ id: transactionId, error: deleteResult.error });
+        } else {
+          deletedCount++;
+        }
+      }
+
+      if (errors.length > 0 && deletedCount === 0) {
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao deletar transações órfãs',
+            details: errors,
+          },
+        };
+      }
+
+      const message =
+        errors.length > 0
+          ? `${deletedCount} transação(ões) removida(s), ${errors.length} erro(s)`
+          : `${deletedCount} transação(ões) órfã(s) removida(s) com sucesso`;
+
+      console.log('Limpeza concluída:', message);
+
+      return {
+        data: {
+          deletedCount,
+          errors: errors.length > 0 ? errors : undefined,
+          message,
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Erro em cleanupOrphanedShoppingTransactions:', error);
+      return {
+        data: null,
+        error: {
+          message: 'Erro ao limpar transações órfãs',
+          details: error.message || error,
+        },
+      };
+    }
+  }
+
+  /**
+   * Deleta uma transação específica de compras por ID
+   * Útil para remover transações órfãs específicas manualmente
+   */
+  static async deleteShoppingTransaction(
+    transactionId: string | number,
+    userId: string | number,
+  ) {
+    try {
+      // Verificar se a transação existe e é do tipo expense com descrição "Compras:"
+      const transactionResult = await db
+        .from('tbl_transactions')
+        .select('id, description, type')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (transactionResult.error || !transactionResult.data) {
+        return {
+          data: null,
+          error: {
+            message: 'Transação não encontrada',
+            details: transactionResult.error,
+          },
+        };
+      }
+
+      const transaction = transactionResult.data;
+
+      // Verificar se é uma transação de compras
+      if (
+        transaction.type !== 'expense' ||
+        !transaction.description?.startsWith('Compras:')
+      ) {
+        return {
+          data: null,
+          error: {
+            message: 'Esta transação não é uma transação de compras válida',
+          },
+        };
+      }
+
+      // Deletar a transação
+      const deleteResult = await db
+        .from('tbl_transactions')
+        .delete()
+        .eq('id', transactionId)
+        .eq('user_id', userId);
+
+      if (deleteResult.error) {
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao deletar transação',
+            details: deleteResult.error,
+          },
+        };
+      }
+
+      return {
+        data: {
+          success: true,
+          message: 'Transação de compras deletada com sucesso',
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Erro em deleteShoppingTransaction:', error);
+      return {
+        data: null,
+        error: {
+          message: 'Erro ao deletar transação de compras',
+          details: error.message || error,
+        },
+      };
+    }
   }
 
   static async completeShoppingList(
