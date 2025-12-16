@@ -31,7 +31,7 @@
 
     /* Compatibility / sanity */
     "skipLibCheck": true,
-    "types": ["node", "jest"]
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": [
