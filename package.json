@@ -13,9 +13,7 @@
     "test:dev": "cross-env NODE_ENV=development jest",
     "test:prod": "cross-env NODE_ENV=production jest",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit",
-    "db:reset:dev": "cross-env NODE_ENV=development node -e \"require('./dist/config/database.js').databaseManager\"",
-    "db:reset:prod": "cross-env NODE_ENV=production node -e \"require('./dist/config/database.js').databaseManager\""
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "finance",
@@ -27,9 +25,11 @@
   ],
   "author": "MyFinControl",
   "license": "MIT",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.38.4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/swagger-ui-express": "^4.1.8",
     "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
@@ -41,7 +41,6 @@
     "helmet": "^7.0.0",
     "joi": "^17.9.2",
     "jsonwebtoken": "^9.0.2",
-    "sqlite3": "^5.1.7",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
