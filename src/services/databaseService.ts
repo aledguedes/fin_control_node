@@ -1,24 +1,9 @@
-import { db, dbConfig } from '../server';
+import { databaseManager } from '../config/database';
+
+const db = databaseManager.getDatabase();
+const dbConfig = databaseManager.getConfig();
 
 export class DatabaseService {
-  // Métodos genéricos para SQLite
-  private static querySQLite(sql: string, params: any[] = []) {
-    if (dbConfig.type === 'sqlite') {
-      const stmt = db.prepare(sql);
-      const sqlLower = sql.trim().toLowerCase();
-      if (sqlLower.startsWith('select') || sqlLower.includes('returning')) {
-        return stmt.all(params);
-      } else {
-        const result = stmt.run(params);
-        return {
-          data: { lastInsertRowid: result.lastInsertRowid },
-          error: null,
-        };
-      }
-    }
-    return null;
-  }
-
   // Métodos genéricos para Supabase
   private static async querySupabase(
     table: string,
@@ -26,179 +11,103 @@ export class DatabaseService {
     data?: any,
     filters?: any,
   ) {
-    if (dbConfig.type === 'supabase') {
-      let query = db.from(table);
+    // Agora sempre assumimos Supabase
+    let query = db.from(table);
 
-      switch (operation) {
-        case 'select':
-          query = query.select('*');
-          if (filters) {
-            Object.keys(filters).forEach((key) => {
-              query = query.eq(key, filters[key]);
-            });
-          }
-          break;
-        case 'insert':
-          query = query.insert(data);
-          break;
-        case 'update':
-          query = query.update(data);
-          if (filters) {
-            Object.keys(filters).forEach((key) => {
-              query = query.eq(key, filters[key]);
-            });
-          }
-          break;
-        case 'delete':
-          query = query.delete();
-          if (filters) {
-            Object.keys(filters).forEach((key) => {
-              query = query.eq(key, filters[key]);
-            });
-          }
-          break;
-      }
-
-      const result = await query;
-      return { data: result.data, error: result.error };
+    switch (operation) {
+      case 'select':
+        query = query.select('*');
+        if (filters) {
+          Object.keys(filters).forEach((key) => {
+            query = query.eq(key, filters[key]);
+          });
+        }
+        break;
+      case 'insert':
+        query = query.insert(data);
+        break;
+      case 'update':
+        query = query.update(data);
+        if (filters) {
+          Object.keys(filters).forEach((key) => {
+            query = query.eq(key, filters[key]);
+          });
+        }
+        break;
+      case 'delete':
+        query = query.delete();
+        if (filters) {
+          Object.keys(filters).forEach((key) => {
+            query = query.eq(key, filters[key]);
+          });
+        }
+        break;
     }
-    return null;
+
+    const result = await query;
+    return { data: result.data, error: result.error };
   }
 
   // Métodos específicos para Users
   static async getUserByEmail(email: string) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_users WHERE email = ?',
-        [email],
-      );
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_users', 'select', null, { email });
-    }
+    const result = await db
+      .from('tbl_users')
+      .select('*')
+      .eq('email', email)
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async createUser(userData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { email, password_hash, password, full_name } = userData;
-      const passwordToStore = password_hash || password;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_users (email, password) VALUES (?, ?) RETURNING *',
-        [email, passwordToStore],
-      );
-
-      if (result && result.length > 0) {
-        return {
-          data: result[0],
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar usuário' } };
-    } else {
-      return await this.querySupabase('tbl_users', 'insert', userData);
-    }
+    // Usa select() no final da query 'insert' para retornar o objeto criado, se configurado assim no helper,
+    // mas o helper genérico usa o padrão do supabase que retorna vazio por padrão se não chamar select().
+    // A chamada direta abaixo é mais segura para garantir o retorno.
+    const result = await db
+      .from('tbl_users')
+      .insert(userData)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async getUserById(id: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite('SELECT * FROM tbl_users WHERE id = ?', [
-        id,
-      ]);
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_users', 'select', null, { id });
-    }
+    return await this.querySupabase('tbl_users', 'select', null, { id });
   }
 
   // Métodos para Financial Categories
   static async getFinancialCategories(userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_financial_categories WHERE user_id = ?',
-        [userId],
-      );
-      return { data: result, error: null };
-    } else {
-      return await this.querySupabase(
-        'tbl_financial_categories',
-        'select',
-        null,
-        { user_id: userId },
-      );
-    }
+    const result = await db
+      .from('tbl_financial_categories')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    return { data: result.data, error: result.error };
   }
 
   static async createFinancialCategory(categoryData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { name, type, user_id } = categoryData;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_financial_categories (name, type, user_id) VALUES (?, ?, ?)',
-        [name, type, user_id],
-      );
-
-      if (result && result.data) {
-        const categoryId = result.data.lastInsertRowid;
-        const newCategory = this.querySQLite(
-          'SELECT * FROM tbl_financial_categories WHERE id = ?',
-          [categoryId],
-        );
-        return {
-          data: newCategory && newCategory.length > 0 ? newCategory[0] : null,
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar categoria' } };
-    } else {
-      return await this.querySupabase(
-        'tbl_financial_categories',
-        'insert',
-        categoryData,
-      );
-    }
+    const result = await db
+      .from('tbl_financial_categories')
+      .insert(categoryData)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async getFinancialTransactions(
     userId: string | number,
     filters?: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      let sql = 'SELECT * FROM tbl_transactions WHERE user_id = ?';
-      const params = [userId];
+    let query = db.from('tbl_transactions').select('*').eq('user_id', userId);
 
-      if (filters?.start_date) {
-        sql += ' AND transaction_date >= ?';
-        params.push(filters.start_date);
-      }
-      if (filters?.end_date) {
-        sql += ' AND transaction_date <= ?';
-        params.push(filters.end_date);
-      }
-      if (filters?.category_id) {
-        sql += ' AND category_id = ?';
-        params.push(filters.category_id);
-      }
+    if (filters?.start_date)
+      query = query.gte('transaction_date', filters.start_date);
+    if (filters?.end_date)
+      query = query.lte('transaction_date', filters.end_date);
+    if (filters?.category_id)
+      query = query.eq('category_id', filters.category_id);
 
-      const result = this.querySQLite(sql, params);
-      return { data: result, error: null };
-    } else {
-      let query = db.from('tbl_transactions').select('*').eq('user_id', userId);
-
-      if (filters?.start_date)
-        query = query.gte('transaction_date', filters.start_date);
-      if (filters?.end_date)
-        query = query.lte('transaction_date', filters.end_date);
-      if (filters?.category_id)
-        query = query.eq('category_id', filters.category_id);
-
-      const result = await query;
-      return { data: result.data, error: result.error };
-    }
+    const result = await query;
+    return { data: result.data, error: result.error };
   }
 
   static async createFinancialTransaction(transactionData: any) {
@@ -225,83 +134,49 @@ export class DatabaseService {
       paidInstallments: paid_installments,
       startDate: start_date,
     };
-    installments_json = JSON.stringify(installmentsData);
+    installments_json = installmentsData; // JSONB aceita objeto direto
 
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        `INSERT INTO tbl_transactions (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-         RETURNING *`,
-        [
-          description,
-          amount,
-          type,
-          category_id,
-          user_id,
-          transaction_date,
-          is_installment ? 1 : 0,
-          total_installments,
-          1,
-          start_date || transaction_date,
-          installments_json,
-          is_recurrent ? 1 : 0,
-          recurrence_start_date || null,
-          payment_method || null,
-        ],
-      );
+    const dataToInsert = {
+      description,
+      amount,
+      type,
+      category_id,
+      user_id,
+      transaction_date: transaction_date,
+      is_installment,
+      total_installments,
+      installment_number: 1,
+      start_date: start_date || transaction_date,
+      installments: installments_json,
+      is_recurrent,
+      recurrence_start_date: recurrence_start_date || null,
+      payment_method,
+    };
 
-      if (result && result.length > 0) {
-        return {
-          data: result[0],
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar transação' } };
-    } else {
-      const dataToInsert = {
-        description,
-        amount,
-        type,
-        category_id,
-        user_id,
-        transaction_date: transaction_date,
-        is_installment,
-        total_installments,
-        installment_number: 1,
-        start_date: start_date || transaction_date,
-        installments: installments_json,
-        is_recurrent,
-        recurrence_start_date,
-        payment_method,
-      };
+    const result = await db
+      .from('tbl_transactions')
+      .insert(dataToInsert)
+      .select()
+      .single();
 
-      return await this.querySupabase(
-        'tbl_transactions',
-        'insert',
-        dataToInsert,
-      );
-    }
+    return { data: result.data, error: result.error };
   }
 
   static async getFinancialTransactionById(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_transactions WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_transactions', 'select', null, {
-        id,
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_transactions')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    return {
+      data: result.data,
+      error: result.error,
+    };
   }
 
   static async updateFinancialTransaction(
@@ -309,8 +184,23 @@ export class DatabaseService {
     userId: string | number,
     transactionData: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const {
+    const {
+      description,
+      amount,
+      type,
+      category_id,
+      transaction_date,
+      installment_number,
+      total_installments,
+      is_recurrent,
+      recurrence_start_date,
+      start_date,
+      payment_method,
+    } = transactionData;
+
+    const result = await db
+      .from('tbl_transactions')
+      .update({
         description,
         amount,
         type,
@@ -318,80 +208,30 @@ export class DatabaseService {
         transaction_date,
         installment_number,
         total_installments,
-        is_recurrent,
-        recurrence_start_date,
-        start_date,
-        payment_method,
-      } = transactionData;
+        start_date: start_date || transaction_date,
+        is_recurrent: is_recurrent,
+        recurrence_start_date: recurrence_start_date || null,
+        payment_method: payment_method || null,
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
 
-      // Primeiro verificar se a transação existe e pertence ao usuário
-      const existing = await this.getFinancialTransactionById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Transação não encontrada' } };
-      }
-
-      const result = this.querySQLite(
-        `UPDATE tbl_transactions 
-         SET description = ?, amount = ?, type = ?, category_id = ?, 
-             transaction_date = ?, installment_number = ?, total_installments = ?, start_date = ?, is_recurrent = ?, recurrence_start_date = ?, payment_method = ?
-         WHERE id = ? AND user_id = ?`,
-        [
-          description,
-          amount,
-          type,
-          category_id,
-          transaction_date,
-          installment_number,
-          total_installments,
-          start_date || transaction_date,
-          is_recurrent ? 1 : 0,
-          recurrence_start_date || null,
-          payment_method || null,
-          id,
-          userId,
-        ],
-      );
-
-      // Buscar transação atualizada
-      const updated = this.querySQLite(
-        'SELECT * FROM tbl_transactions WHERE id = ?',
-        [id],
-      );
-      return {
-        data: updated && updated.length > 0 ? updated[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase(
-        'tbl_transactions',
-        'update',
-        transactionData,
-        { id, user_id: userId },
-      );
-    }
+    return { data: result.data, error: result.error };
   }
 
   static async deleteFinancialTransaction(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const existing = await this.getFinancialTransactionById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Transação não encontrada' } };
-      }
-
-      this.querySQLite(
-        'DELETE FROM tbl_transactions WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-      return { data: { success: true }, error: null };
-    } else {
-      return await this.querySupabase('tbl_transactions', 'delete', null, {
-        id,
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_transactions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    console.log('deleteFinancialTransaction result:', result);
+    return { data: { success: !result.error }, error: result.error };
   }
 
   static async getMonthlyTransactions(
@@ -405,67 +245,45 @@ export class DatabaseService {
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${monthStr}-${lastDay}`;
 
-    if (dbConfig.type === 'sqlite') {
-      const sql = `
-        SELECT * FROM tbl_transactions 
-        WHERE user_id = ? 
-        AND (
-          -- REGRA 1: Transações únicas no mês consultado
-          (is_installment = 0 AND is_recurrent = 0 AND transaction_date >= ? AND transaction_date <= ?)
-          
-          -- REGRA 2: Transações recorrentes ativas
-          -- Busca recorrentes cujo início é anterior ou igual ao final do mês
-          OR (is_recurrent = 1 AND recurrence_start_date IS NOT NULL AND recurrence_start_date <= ?)
-          
-          -- REGRA 3: Transações Parceladas ATIVAS (CORREÇÃO AQUI)
-          -- Busca parceladas cuja data de início (startDate no JSON) é anterior ou igual ao final do mês
-          -- Nota: 'json_extract(installments, '$.startDate')' é o padrão SQLite para extrair do JSON.
-          OR (is_installment = 1 AND json_extract(installments, '$.startDate') <= ?)
-        )
-        ORDER BY transaction_date ASC
-      `;
-      const result = this.querySQLite(sql, [
-        userId,
-        startDate,
-        endDate,
-        endDate,
-        endDate,
-      ]);
-      return { data: result, error: null };
-    } else {
+    // Para parcelamentos, precisamos buscar todos que podem ter parcelas no mês consultado
+    // Buscamos todos os parcelamentos ativos (onde ainda há parcelas a pagar)
+    // O código JavaScript calculará quais parcelas específicas caem no mês consultado
+    const result = await db
+      .from('tbl_transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .or(
+        // Transações únicas no mês
+        `and(is_installment.eq.false,is_recurrent.eq.false,transaction_date.gte.${startDate},transaction_date.lte.${endDate}),` +
+          // Transações recorrentes que começaram antes ou durante o mês
+          `and(is_recurrent.eq.true,recurrence_start_date.not.is.null,recurrence_start_date.lte.${endDate}),` +
+          // Parcelamentos: busca todos os parcelamentos ativos
+          // O filtro por mês será feito no código JavaScript ao calcular as parcelas
+          `is_installment.eq.true`,
+      )
+      .order('transaction_date', { ascending: true });
+
+    return { data: result.data, error: result.error };
+  }
+
+  static async getInstallmentPlans(userId: string | number) {
+    try {
       const result = await db
         .from('tbl_transactions')
         .select('*')
         .eq('user_id', userId)
-        .or(
-          `and(is_installment.eq.false,is_recurrent.eq.false,transaction_date.gte.${startDate},transaction_date.lte.${endDate}),` +
-            `and(is_recurrent.eq.true,recurrence_start_date.not.is.null,recurrence_start_date.lte.${endDate}),` +
-            `and(is_installment.eq.true,installments->>'startDate'.lte.${endDate})`,
-        )
+        .gt('total_installments', 1)
         .order('transaction_date', { ascending: true });
 
-      return { data: result.data, error: result.error };
-    }
-  }
+      if (result.error) {
+        console.error('Erro na query getInstallmentPlans:', result.error);
+        return { data: null, error: result.error };
+      }
 
-  static async getInstallmentPlans(userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const sql = `
-        SELECT * FROM tbl_transactions 
-        WHERE user_id = ? 
-        AND total_installments > 1
-        ORDER BY transaction_date ASC
-      `;
-      const result = this.querySQLite(sql, [userId]);
-
-      const plans = (result || []).map((tx: any) => {
-        let installments = null;
-        try {
-          installments = tx.installments ? JSON.parse(tx.installments) : null;
-        } catch (e) {
-          installments = null;
-        }
-
+      // Processamento similar ao que existia para garantir formato consistente se necessário
+      // No Supabase, o JSON já vem parseado em 'installments'
+      const plans = (result.data || []).map((tx: any) => {
+        const installments = tx.installments;
         const totalInstallments =
           tx.total_installments || installments?.totalInstallments || 1;
         const paidInstallments =
@@ -493,399 +311,563 @@ export class DatabaseService {
       });
 
       return { data: plans, error: null };
-    } else {
-      const result = await db
-        .from('tbl_transactions')
-        .select('*')
-        .eq('user_id', userId)
-        .gt('total_installments', 1)
-        .order('transaction_date', { ascending: true });
-
-      return { data: result.data, error: result.error };
+    } catch (error: any) {
+      console.error('Erro em getInstallmentPlans:', error);
+      return {
+        data: null,
+        error: {
+          message:
+            error.message ||
+            'Erro desconhecido ao buscar planos de parcelamento',
+          details: error,
+        },
+      };
     }
   }
 
   static async getShoppingLists(userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_shopping_lists WHERE user_id = ?',
-        [userId],
-      );
-      return { data: result, error: null };
-    } else {
-      return await this.querySupabase('tbl_shopping_lists', 'select', null, {
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_shopping_lists')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }); // Usar created_at pois updated_at não existe na tabela
+    return { data: result.data, error: result.error };
   }
 
   static async getShoppingListById(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_shopping_lists', 'select', null, {
-        id,
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_shopping_lists')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async getShoppingListWithItems(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Buscar a lista
-      const listResult = await this.getShoppingListById(id, userId);
-      if (!listResult || !listResult.data) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
-      }
+    // Busca a lista
+    const listResult = await db
+      .from('tbl_shopping_lists')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
 
-      // Buscar os itens da lista
-      const itemsResult = await this.getShoppingItems(id);
-
-      return {
-        data: {
-          ...listResult.data,
-          items: itemsResult.data || [],
-        },
-        error: null,
-      };
-    } else {
-      const result = await db
-        .from('tbl_shopping_lists')
-        .select('*, tbl_shopping_items(*)')
-        .eq('id', id)
-        .eq('user_id', userId)
-        .single();
-
-      return { data: result.data, error: result.error };
+    if (listResult.error) {
+      return { data: null, error: listResult.error };
     }
+
+    // Busca os itens com detalhes do produto
+    const itemsResult = await db
+      .from('tbl_shopping_list_items')
+      .select(
+        `
+        *,
+        tbl_products (
+          name,
+          category_id,
+          tbl_shopping_categories (
+            name
+          )
+        )
+      `,
+      )
+      .eq('shopping_list_id', id);
+
+    // Transforma a estrutura para ficar compatível com o frontend se necessário
+    // O frontend espera items com product_name e category_name planos?
+    // Olhando o original SQLite: "SELECT si.*, p.name as product_name, sc.name as category_name"
+    // Vamos mapear para manter compatibilidade
+    const items = (itemsResult.data || []).map((item: any) => ({
+      ...item,
+      product_name: item.tbl_products?.name,
+      category_name: item.tbl_products?.tbl_shopping_categories?.name,
+    }));
+
+    return {
+      data: {
+        ...listResult.data,
+        items,
+      },
+      error: itemsResult.error,
+    };
   }
 
   static async deleteShoppingList(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Primeiro verificar se a lista existe e pertence ao usuário
-      const existing = await this.getShoppingListById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
+    // 1. Verificar se a lista existe e obter informações
+    const listResult = await db
+      .from('tbl_shopping_lists')
+      .select('name, status')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (!listResult.data) {
+      return {
+        data: null,
+        error: { message: 'Lista não encontrada' },
+      };
+    }
+
+    const listName = listResult.data.name;
+    const listStatus = listResult.data.status;
+
+    // 2. Se a lista estiver completada, remover a transação relacionada
+    if (listStatus === 'completed') {
+      const description = `Compras: ${listName || 'Lista'}`;
+
+      // Buscar e deletar a transação relacionada
+      const transactionResult = await db
+        .from('tbl_transactions')
+        .delete()
+        .eq('description', description)
+        .eq('user_id', userId)
+        .eq('type', 'expense');
+
+      if (transactionResult.error) {
+        console.error(
+          'Erro ao deletar transação relacionada:',
+          transactionResult.error,
+        );
+        // Continua mesmo se houver erro ao deletar a transação
+      }
+    }
+
+    // 3. Deletar a lista
+    const result = await db
+      .from('tbl_shopping_lists')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    console.log('deleteShoppingList result:', result);
+    return { data: { success: !result.error }, error: result.error };
+  }
+
+  /**
+   * Remove transações órfãs (transações de listas de compras que foram deletadas)
+   */
+  static async cleanupOrphanedShoppingTransactions(userId: string | number) {
+    try {
+      console.log('Iniciando limpeza de transações órfãs para userId:', userId);
+
+      // 1. Buscar todas as transações do tipo expense do usuário
+      // Vamos buscar todas e filtrar por descrição em JavaScript para evitar problemas com .like()
+      const transactionsResult = await db
+        .from('tbl_transactions')
+        .select('id, description')
+        .eq('user_id', userId)
+        .eq('type', 'expense');
+
+      if (transactionsResult.error) {
+        console.error('Erro ao buscar transações:', transactionsResult.error);
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao buscar transações',
+            details: transactionsResult.error,
+          },
+        };
       }
 
-      // Excluir itens da lista primeiro
-      this.querySQLite(
-        'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
-        [id],
+      // Filtrar apenas transações que começam com "Compras:"
+      const transactions = (transactionsResult.data || []).filter((tx: any) =>
+        tx.description?.startsWith('Compras:'),
       );
 
-      // Excluir a lista
-      this.querySQLite(
-        'DELETE FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
-        [id, userId],
+      console.log(
+        `Encontradas ${transactions.length} transação(ões) de compras`,
       );
 
-      return { data: { success: true }, error: null };
-    } else {
-      return await this.querySupabase('tbl_shopping_lists', 'delete', null, {
-        id,
-        user_id: userId,
-      });
+      if (transactions.length === 0) {
+        return {
+          data: {
+            deletedCount: 0,
+            message: 'Nenhuma transação de compras encontrada',
+          },
+          error: null,
+        };
+      }
+
+      // 2. Buscar todas as listas de compras do usuário (não apenas completadas,
+      // pois uma lista pode ter sido deletada após ser completada)
+      const listsResult = await db
+        .from('tbl_shopping_lists')
+        .select('name')
+        .eq('user_id', userId);
+
+      if (listsResult.error) {
+        console.error('Erro ao buscar listas:', listsResult.error);
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao buscar listas de compras',
+            details: listsResult.error,
+          },
+        };
+      }
+
+      const existingLists = (listsResult.data || []).map(
+        (list: any) => list.name,
+      );
+      console.log(
+        `Encontradas ${existingLists.length} lista(s) de compras existente(s)`,
+      );
+
+      // 3. Normalizar nomes das listas para comparação (lowercase, trim, remover espaços extras)
+      const normalizeName = (name: string) => {
+        return name.toLowerCase().trim().replace(/\s+/g, ' '); // Remove espaços múltiplos
+      };
+
+      const normalizedExistingLists = existingLists.map(normalizeName);
+      console.log('Listas existentes normalizadas:', normalizedExistingLists);
+
+      // 4. Identificar transações órfãs
+      const orphanedTransactions: string[] = [];
+
+      for (const transaction of transactions) {
+        // Extrair o nome da lista da descrição (formato: "Compras: Nome da Lista")
+        const listName = transaction.description
+          .replace(/^Compras:\s*/i, '') // Case-insensitive
+          .trim();
+
+        const normalizedListName = normalizeName(listName);
+
+        console.log(
+          `Verificando transação: "${transaction.description}" -> Nome extraído: "${listName}" -> Normalizado: "${normalizedListName}"`,
+        );
+
+        // Se não encontrar uma lista correspondente (comparação normalizada), é uma transação órfã
+        if (!normalizedExistingLists.includes(normalizedListName)) {
+          orphanedTransactions.push(transaction.id);
+          console.log(
+            `✓ Transação órfã encontrada: ID=${transaction.id}, Descrição="${transaction.description}", Nome extraído="${listName}"`,
+          );
+        } else {
+          console.log(
+            `✓ Transação válida (lista encontrada): ID=${transaction.id}, Descrição="${transaction.description}"`,
+          );
+        }
+      }
+
+      if (orphanedTransactions.length === 0) {
+        return {
+          data: {
+            deletedCount: 0,
+            message: 'Nenhuma transação órfã encontrada',
+          },
+          error: null,
+        };
+      }
+
+      console.log(
+        `Preparando para deletar ${orphanedTransactions.length} transação(ões) órfã(s)`,
+      );
+      console.log('IDs das transações órfãs:', orphanedTransactions);
+
+      // 5. Deletar transações órfãs uma por uma para garantir que funcione
+      let deletedCount = 0;
+      const errors: any[] = [];
+
+      for (const transactionId of orphanedTransactions) {
+        const deleteResult = await db
+          .from('tbl_transactions')
+          .delete()
+          .eq('id', transactionId)
+          .eq('user_id', userId);
+
+        if (deleteResult.error) {
+          console.error(
+            `Erro ao deletar transação ${transactionId}:`,
+            deleteResult.error,
+          );
+          errors.push({ id: transactionId, error: deleteResult.error });
+        } else {
+          deletedCount++;
+        }
+      }
+
+      if (errors.length > 0 && deletedCount === 0) {
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao deletar transações órfãs',
+            details: errors,
+          },
+        };
+      }
+
+      const message =
+        errors.length > 0
+          ? `${deletedCount} transação(ões) removida(s), ${errors.length} erro(s)`
+          : `${deletedCount} transação(ões) órfã(s) removida(s) com sucesso`;
+
+      console.log('Limpeza concluída:', message);
+
+      return {
+        data: {
+          deletedCount,
+          errors: errors.length > 0 ? errors : undefined,
+          message,
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Erro em cleanupOrphanedShoppingTransactions:', error);
+      return {
+        data: null,
+        error: {
+          message: 'Erro ao limpar transações órfãs',
+          details: error.message || error,
+        },
+      };
     }
   }
 
-  //
+  /**
+   * Deleta uma transação específica de compras por ID
+   * Útil para remover transações órfãs específicas manualmente
+   */
+  static async deleteShoppingTransaction(
+    transactionId: string | number,
+    userId: string | number,
+  ) {
+    try {
+      // Verificar se a transação existe e é do tipo expense com descrição "Compras:"
+      const transactionResult = await db
+        .from('tbl_transactions')
+        .select('id, description, type')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (transactionResult.error || !transactionResult.data) {
+        return {
+          data: null,
+          error: {
+            message: 'Transação não encontrada',
+            details: transactionResult.error,
+          },
+        };
+      }
+
+      const transaction = transactionResult.data;
+
+      // Verificar se é uma transação de compras
+      if (
+        transaction.type !== 'expense' ||
+        !transaction.description?.startsWith('Compras:')
+      ) {
+        return {
+          data: null,
+          error: {
+            message: 'Esta transação não é uma transação de compras válida',
+          },
+        };
+      }
+
+      // Deletar a transação
+      const deleteResult = await db
+        .from('tbl_transactions')
+        .delete()
+        .eq('id', transactionId)
+        .eq('user_id', userId);
+
+      if (deleteResult.error) {
+        return {
+          data: null,
+          error: {
+            message: 'Erro ao deletar transação',
+            details: deleteResult.error,
+          },
+        };
+      }
+
+      return {
+        data: {
+          success: true,
+          message: 'Transação de compras deletada com sucesso',
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Erro em deleteShoppingTransaction:', error);
+      return {
+        data: null,
+        error: {
+          message: 'Erro ao deletar transação de compras',
+          details: error.message || error,
+        },
+      };
+    }
+  }
 
   static async completeShoppingList(
     id: string | number,
     userId: string | number,
     listPayload: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const transaction = db.transaction(() => {
-        const listCheck = db
-          .prepare(
-            'SELECT * FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
-          )
-          .get(id, userId);
+    // 1. Verificar lista
+    const listResult = await db
+      .from('tbl_shopping_lists')
+      .select('name')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
 
-        if (!listCheck) {
-          throw new Error('Lista não encontrada');
-        }
+    if (!listResult.data) {
+      return { data: null, error: { message: 'Lista não encontrada' } };
+    }
+    const listName = listResult.data.name;
 
-        if (listPayload && Array.isArray(listPayload.items)) {
-          const updateItemStmt = db.prepare(
-            `UPDATE tbl_shopping_list_items 
-                    SET quantity = ?, price = ?, checked = ?
-                    WHERE id = ? AND shopping_list_id = ?`,
-          );
-
-          for (const item of listPayload.items) {
-            updateItemStmt.run(
-              item.quantity,
-              item.price,
-              item.checked ? 1 : 0,
-              item.id,
-              id,
-            );
-          }
-        }
-
-        const items = db
-          .prepare(
-            'SELECT quantity, price FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
-          )
-          .all(id);
-
-        const totalAmount = items.reduce((sum: number, item: any) => {
-          return sum + (item.quantity || 0) * (item.price || 0);
-        }, 0);
-
-        const completedAt = new Date().toISOString().split('T')[0];
-
-        db.prepare(
-          `UPDATE tbl_shopping_lists 
-                SET status = 'completed', completed_at = ?, total_amount = ?
-                WHERE id = ? AND user_id = ?`,
-        ).run(completedAt, totalAmount, id, userId);
-
-        const category = db
-          .prepare(
-            'SELECT id FROM tbl_financial_categories WHERE name = ? AND user_id = ? AND type = ?',
-          )
-          .get('Alimentação', userId, 'expense');
-
-        if (!category) {
-          throw new Error(
-            'Categoria "Alimentação" não encontrada para o usuário.',
-          );
-        }
-        const categoryId = category.id;
-
-        const description = `Compras: ${listCheck.name || 'Lista'}`;
-        const installmentsData = {
-          totalInstallments: 1,
-          paidInstallments: 1,
-          startDate: completedAt,
-        };
-        const installmentsJson = JSON.stringify(installmentsData);
-
-        db.prepare(
-          `INSERT INTO tbl_transactions 
-                (description, amount, type, category_id, user_id, transaction_date, is_installment, total_installments, installment_number, start_date, installments, is_recurrent, recurrence_start_date, payment_method) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          description,
-          totalAmount,
-          'expense',
-          categoryId,
-          userId,
-          completedAt,
-          0,
-          1,
-          1,
-          completedAt,
-          installmentsJson,
-          0,
-          null,
-          null,
-        );
-
-        return db
-          .prepare('SELECT * FROM tbl_shopping_lists WHERE id = ?')
-          .get(id);
-      });
-
-      try {
-        const updatedList = transaction();
-        return { data: updatedList, error: null };
-      } catch (error: any) {
-        return {
-          data: null,
-          error: { message: error.message || 'Erro ao finalizar lista' },
-        };
+    // 2. Atualizar itens se fornecidos
+    if (listPayload && Array.isArray(listPayload.items)) {
+      // Como update em lote não é trivial sem RPC, vamos iterar (ou usar upsert se tivéssemos todos os campos)
+      // Iterar é seguro para pouca quantidade.
+      for (const item of listPayload.items) {
+        await db
+          .from('tbl_shopping_list_items')
+          .update({
+            quantity: item.quantity,
+            price: item.price,
+            checked: item.checked,
+          })
+          .eq('id', item.id)
+          .eq('shopping_list_id', id);
       }
-    } else {
-      const listCheckResult = await this.querySupabase(
-        'tbl_shopping_lists',
-        'select',
-        'name',
-        { id, user_id: userId },
-      );
+    }
 
-      if (
-        !listCheckResult ||
-        !listCheckResult.data ||
-        listCheckResult.data.length === 0
-      ) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
-      }
-      const listName = listCheckResult.data[0].name;
+    // 3. Recalcular total (fazendo query dos itens atualizados)
+    const itemsResult = await db
+      .from('tbl_shopping_list_items')
+      .select('quantity, price')
+      .eq('shopping_list_id', id);
 
-      if (listPayload && Array.isArray(listPayload.items)) {
-        for (const item of listPayload.items) {
-          await this.querySupabase(
-            'tbl_shopping_list_items',
-            'update',
-            {
-              quantity: item.quantity,
-              price: item.price,
-              checked: item.checked,
-            },
-            { id: item.id, shopping_list_id: id },
-          );
-        }
-      }
-
-      const itemsResult = await this.querySupabase(
-        'tbl_shopping_list_items',
-        'select',
-        'quantity, price',
-        { shopping_list_id: id },
-      );
-
-      if (!itemsResult) {
-        return {
-          data: null,
-          error: { message: 'Erro ao buscar itens da lista para cálculo.' },
-        };
-      }
-
-      const items = itemsResult.data || [];
-      const totalAmount = items.reduce((sum: number, item: any) => {
-        return sum + (item.quantity || 0) * (item.price || 0);
-      }, 0);
-
-      const completedAt = new Date().toISOString().split('T')[0];
-
-      await this.querySupabase(
-        'tbl_shopping_lists',
-        'update',
-        {
-          status: 'completed',
-          completed_at: completedAt,
-          total_amount: totalAmount,
-        },
-        { id, user_id: userId },
-      );
-
-      const categoryResult = await this.querySupabase(
-        'tbl_financial_categories',
-        'select',
-        'id',
-        { name: 'Alimentação', user_id: userId, type: 'expense' },
-      );
-
-      if (
-        !categoryResult ||
-        !categoryResult.data ||
-        categoryResult.data.length === 0
-      ) {
-        return {
-          data: null,
-          error: {
-            message: 'Categoria "Alimentação" não encontrada para o usuário.',
-          },
-        };
-      }
-      const categoryId = categoryResult.data[0].id;
-
-      const finalResult = await this.querySupabase(
-        'tbl_shopping_lists',
-        'select',
-        '*',
-        { id, user_id: userId },
-      );
-
-      if (!finalResult || !finalResult.data || finalResult.data.length === 0) {
-        return {
-          data: null,
-          error: { message: 'Erro ao buscar lista atualizada após conclusão.' },
-        };
-      }
-
+    if (itemsResult.error) {
       return {
-        data: {
-          ...finalResult.data[0],
-          totalAmount,
-          listName,
-          completedAt,
-          categoryId,
-        },
-        error: null,
+        data: null,
+        error: { message: 'Erro ao buscar itens da lista para cálculo.' },
       };
     }
+
+    const items = itemsResult.data || [];
+    const totalAmount = items.reduce((sum: number, item: any) => {
+      const q = Number(item.quantity) || 0;
+      const p = Number(item.price) || 0;
+      return sum + q * p;
+    }, 0);
+
+    const completedAt = new Date().toISOString().split('T')[0];
+
+    // 4. Atualizar lista com status completed
+    await db
+      .from('tbl_shopping_lists')
+      .update({
+        status: 'completed',
+        completed_at: completedAt,
+        total_amount: totalAmount,
+      })
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    // 5. Criar transação financeira
+    // Buscar categoria "Alimentação"
+    const categoryResult = await db
+      .from('tbl_financial_categories')
+      .select('id')
+      .eq('name', 'Alimentação')
+      .eq('user_id', userId)
+      .eq('type', 'expense')
+      .single();
+
+    if (!categoryResult.data) {
+      // Se não achar, tenta criar ou falha? Original falhava.
+      return {
+        data: null,
+        error: {
+          message: 'Categoria "Alimentação" não encontrada para o usuário.',
+        },
+      };
+    }
+    const categoryId = categoryResult.data.id;
+
+    const description = `Compras: ${listName || 'Lista'}`;
+    const installmentsData = {
+      totalInstallments: 1,
+      paidInstallments: 1,
+      startDate: completedAt,
+    };
+
+    await db.from('tbl_transactions').insert({
+      description,
+      amount: totalAmount,
+      type: 'expense',
+      category_id: categoryId,
+      user_id: userId,
+      transaction_date: completedAt,
+      is_installment: false,
+      total_installments: 1,
+      installment_number: 1,
+      start_date: completedAt,
+      installments: installmentsData,
+      is_recurrent: false,
+      recurrence_start_date: null,
+      payment_method: null,
+    });
+
+    // 6. Retornar lista atualizada
+    const finalResult = await db
+      .from('tbl_shopping_lists')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    return {
+      data: {
+        ...finalResult.data,
+        totalAmount,
+        listName,
+        completedAt,
+        categoryId,
+      },
+      error: null,
+    };
   }
 
   static async getShoppingItems(listId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const sql = `
-        SELECT si.*, p.name as product_name, sc.name as category_name 
-        FROM tbl_shopping_list_items si
-        LEFT JOIN tbl_products p ON si.product_id = p.id
-        LEFT JOIN tbl_shopping_categories sc ON p.category_id = sc.id
-        WHERE si.shopping_list_id = ?
-      `;
-      const result = this.querySQLite(sql, [listId]);
-      return { data: result, error: null };
-    } else {
-      const result = await db
-        .from('tbl_shopping_list_items')
-        .select(
-          `*, 
-          tbl_products(name, category_id), 
-          category:tbl_products(tbl_shopping_categories(name))
-        `,
-        )
-        .eq('shopping_list_id', listId);
-      // Transform result to match expected format if needed, or just return
-      // Simpler Supabase query if relations are set up:
-      // But for now let's just fix table name
-      const result2 = await db
-        .from('tbl_shopping_list_items')
-        .select(
-          `*, 
-          tbl_products(name)
-        `,
-        )
-        .eq('shopping_list_id', listId);
-      return { data: result2.data, error: result2.error };
-    }
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .select(
+        `*, 
+        tbl_products(name, category_id), 
+        category:tbl_products(tbl_shopping_categories(name))
+      `,
+      )
+      .eq('shopping_list_id', listId);
+
+    // Ajuste para compatibilidade (sugerido no código original)
+    // O front pode esperar product_name solto ou o objeto relations
+    return { data: result.data, error: result.error };
   }
 
   static async createShoppingItem(itemData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { quantity, price, shopping_list_id, product_id } = itemData;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id) VALUES (?, ?, ?, ?) RETURNING *',
-        [quantity, price || 0, shopping_list_id, product_id],
-      );
-
-      if (result && result.length > 0) {
-        return {
-          data: result[0],
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar item' } };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_list_items',
-        'insert',
-        itemData,
-      );
-    }
+    console.log('createShoppingItem itemData:', itemData);
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .insert(itemData)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async updateShoppingItem(
@@ -894,40 +876,15 @@ export class DatabaseService {
     userId: string | number,
     itemData: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se o item existe e pertence à lista do usuário
-      const listCheck = await this.getShoppingListById(listId, userId);
-      if (!listCheck || !listCheck.data) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
-      }
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .update(itemData)
+      .eq('id', itemId)
+      .eq('shopping_list_id', listId) // Garante que pertence à lista
+      .select()
+      .single();
 
-      const { quantity, price, checked } = itemData;
-
-      this.querySQLite(
-        `UPDATE tbl_shopping_list_items 
-         SET quantity = ?, price = ?, checked = ?
-         WHERE id = ? AND shopping_list_id = ?`,
-        [quantity, price, checked ? 1 : 0, itemId, listId],
-      );
-
-      // Buscar item atualizado
-      const updated = this.querySQLite(
-        'SELECT * FROM tbl_shopping_list_items WHERE id = ?',
-        [itemId],
-      );
-
-      return {
-        data: updated && updated.length > 0 ? updated[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_list_items',
-        'update',
-        itemData,
-        { id: itemId, shopping_list_id: listId },
-      );
-    }
+    return { data: result.data, error: result.error };
   }
 
   static async deleteShoppingItem(
@@ -935,30 +892,13 @@ export class DatabaseService {
     listId: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se o item existe e pertence à lista do usuário
-      const listCheck = await this.getShoppingListById(listId, userId);
-      if (!listCheck || !listCheck.data) {
-        return { data: null, error: { message: 'Lista não encontrada' } };
-      }
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .delete()
+      .eq('id', itemId)
+      .eq('shopping_list_id', listId);
 
-      this.querySQLite(
-        'DELETE FROM tbl_shopping_list_items WHERE id = ? AND shopping_list_id = ?',
-        [itemId, listId],
-      );
-
-      return { data: { success: true }, error: null };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_list_items',
-        'delete',
-        null,
-        {
-          id: itemId,
-          shopping_list_id: listId,
-        },
-      );
-    }
+    return { data: { success: !result.error }, error: result.error };
   }
 
   static async syncShoppingList(
@@ -966,79 +906,70 @@ export class DatabaseService {
     userId: string | number,
     listData: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const { name, items, status } = listData;
+    const { name, items, status } = listData;
 
-      console.log(name, items, status);
+    // 1. Verificar propriedade da lista
+    const listCheck = await db
+      .from('tbl_shopping_lists')
+      .select('id')
+      .eq('id', listId)
+      .eq('user_id', userId)
+      .single();
 
-      const syncTransaction = db.transaction(() => {
-        // 1. Verify list ownership
-        const listCheck = db
-          .prepare(
-            'SELECT id FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
-          )
-          .get(listId, userId);
-        if (!listCheck) {
-          throw new Error('Lista não encontrada');
-        }
-
-        // 2. Update list details
-        if (name || status) {
-          const updateStmt = db.prepare(`
-             UPDATE tbl_shopping_lists
-             SET name = COALESCE(?, name),
-                 status = COALESCE(?, status)
-             WHERE id = ?
-           `);
-          updateStmt.run(name || null, status || null, listId);
-        }
-
-        // 3. Replace items
-        // Delete existing
-        db.prepare(
-          'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
-        ).run(listId);
-
-        // Insert new
-        if (items && Array.isArray(items) && items.length > 0) {
-          const insertStmt = db.prepare(`
-            INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id, checked)
-            VALUES (?, ?, ?, ?, ?)
-          `);
-          for (const item of items) {
-            insertStmt.run(
-              item.quantity,
-              item.price || 0,
-              listId,
-              item.productId || item.product_id,
-              item.checked ? 1 : 0,
-            );
-          }
-        }
-
-        // Return updated list
-        return db
-          .prepare('SELECT * FROM tbl_shopping_lists WHERE id = ?')
-          .get(listId);
-      });
-
-      try {
-        const result = syncTransaction();
-        // Fetch items to return complete object
-        const itemsResult = await this.getShoppingItems(listId);
-        return { data: { ...result, items: itemsResult.data }, error: null };
-      } catch (error: any) {
-        return {
-          data: null,
-          error: { message: error.message || 'Erro na sincronização' },
-        };
-      }
-    } else {
-      return {
-        data: null,
-        error: { message: 'Sincronização não implementada para Supabase' },
-      };
+    if (!listCheck.data) {
+      return { data: null, error: { message: 'Lista não encontrada' } };
     }
+
+    // 2. Atualizar detalhes da lista
+    if (name || status) {
+      const updateData: any = {};
+      if (name) updateData.name = name;
+      if (status) updateData.status = status;
+
+      const updateRes = await db
+        .from('tbl_shopping_lists')
+        .update(updateData)
+        .eq('id', listId);
+
+      if (updateRes.error) {
+        return { data: null, error: updateRes.error };
+      }
+    }
+
+    // 3. Substituir itens (Delete all + insert new)
+    // Como não temos transações complexas, vamos fazer sequencialmente
+
+    // Deletar existentes
+    const deleteRes = await db
+      .from('tbl_shopping_list_items')
+      .delete()
+      .eq('shopping_list_id', listId);
+
+    if (deleteRes.error) {
+      return { data: null, error: deleteRes.error };
+    }
+
+    // Inserir novos
+    if (items && Array.isArray(items) && items.length > 0) {
+      const itemsToInsert = items.map((item: any) => ({
+        quantity: item.quantity,
+        price: item.price || 0,
+        shopping_list_id: listId,
+        product_id: item.productId || item.product_id,
+        checked: item.checked ? true : false,
+      }));
+
+      const insertRes = await db
+        .from('tbl_shopping_list_items')
+        .insert(itemsToInsert);
+
+      if (insertRes.error) {
+        return { data: null, error: insertRes.error };
+      }
+    }
+
+    // Retornar lista completa
+    return await this.getShoppingListWithItems(listId, userId);
   }
 
   static async addBatchShoppingItems(
@@ -1046,108 +977,62 @@ export class DatabaseService {
     userId: string | number,
     items: any[],
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const batchTransaction = db.transaction(() => {
-        // 1. Verify list ownership
-        const listCheck = db
-          .prepare(
-            'SELECT id FROM tbl_shopping_lists WHERE id = ? AND user_id = ?',
-          )
-          .get(listId, userId);
-        if (!listCheck) {
-          throw new Error('Lista não encontrada');
-        }
+    // 1. Verificar propriedade da lista
+    const listCheck = await db
+      .from('tbl_shopping_lists')
+      .select('id')
+      .eq('id', listId)
+      .eq('user_id', userId)
+      .single();
 
-        // 2. Insert items
-        const insertStmt = db.prepare(`
-          INSERT INTO tbl_shopping_list_items (quantity, price, shopping_list_id, product_id, checked)
-          VALUES (?, ?, ?, ?, ?)
-        `);
-
-        for (const item of items) {
-          insertStmt.run(
-            item.quantity,
-            item.price || 0,
-            listId,
-            item.productId || item.product_id,
-            item.checked ? 1 : 0,
-          );
-        }
-
-        return true;
-      });
-
-      try {
-        batchTransaction();
-        const itemsResult = await this.getShoppingItems(listId);
-        return { data: { items: itemsResult.data }, error: null };
-      } catch (error: any) {
-        return {
-          data: null,
-          error: {
-            message: error.message || 'Erro ao adicionar itens em lote',
-          },
-        };
-      }
-    } else {
-      return {
-        data: null,
-        error: { message: 'Batch insert não implementado para Supabase' },
-      };
+    if (!listCheck.data) {
+      return { data: null, error: { message: 'Lista não encontrada' } };
     }
+
+    // 2. Insert items
+    const itemsToInsert = items.map((item: any) => ({
+      quantity: item.quantity,
+      price: item.price || 0,
+      shopping_list_id: listId,
+      product_id: item.productId || item.product_id,
+      checked: item.checked ? true : false,
+    }));
+
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .insert(itemsToInsert)
+      .select();
+
+    return { data: { items: result.data }, error: result.error };
   }
 
   // Métodos para Products
   static async getProducts(userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_products WHERE user_id = ?',
-        [userId],
-      );
-      return { data: result, error: null };
-    } else {
-      return await this.querySupabase('tbl_products', 'select', null, {
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_products')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    return { data: result.data, error: result.error };
   }
 
   static async createProduct(productData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { name, unit, user_id, category_id } = productData;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_products (name, unit, user_id, category_id) VALUES (?, ?, ?, ?) RETURNING *',
-        [name, unit, user_id, category_id],
-      );
-
-      if (result && result.length > 0) {
-        return {
-          data: result[0],
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar produto' } };
-    } else {
-      return await this.querySupabase('tbl_products', 'insert', productData);
-    }
+    const result = await db
+      .from('tbl_products')
+      .insert(productData)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async getProductById(id: string | number, userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_products WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_products', 'select', null, {
-        id,
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_products')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async updateProduct(
@@ -1155,175 +1040,85 @@ export class DatabaseService {
     userId: string | number,
     productData: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se o produto existe e pertence ao usuário
-      const existing = await this.getProductById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Produto não encontrado' } };
-      }
-
-      const { name, unit, category_id } = productData;
-
-      this.querySQLite(
-        `UPDATE tbl_products 
-         SET name = ?, unit = ?, category_id = ?
-         WHERE id = ? AND user_id = ?`,
-        [name, unit, category_id, id, userId],
-      );
-
-      // Buscar produto atualizado
-      const updated = this.querySQLite(
-        'SELECT * FROM tbl_products WHERE id = ?',
-        [id],
-      );
-
-      return {
-        data: updated && updated.length > 0 ? updated[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase('tbl_products', 'update', productData, {
-        id,
-        user_id: userId,
-      });
-    }
+    const result = await db
+      .from('tbl_products')
+      .update(productData)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async checkProductDependencies(id: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT COUNT(*) as count FROM tbl_shopping_list_items WHERE product_id = ?',
-        [id],
-      );
-      const count = result && result.length > 0 ? result[0].count : 0;
-      return { data: { hasDependencies: count > 0, count }, error: null };
-    } else {
-      const result = await db
-        .from('tbl_shopping_list_items')
-        .select('id', { count: 'exact' })
-        .eq('product_id', id);
+    const result = await db
+      .from('tbl_shopping_list_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', id);
 
-      return {
-        data: {
-          hasDependencies: (result.count || 0) > 0,
-          count: result.count || 0,
-        },
-        error: result.error,
-      };
-    }
+    return {
+      data: {
+        hasDependencies: (result.count || 0) > 0,
+        count: result.count || 0,
+      },
+      error: result.error,
+    };
   }
 
   static async deleteProduct(id: string | number, userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se o produto existe e pertence ao usuário
-      const existing = await this.getProductById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Produto não encontrado' } };
-      }
-
-      // Verificar dependências
-      const dependencies = await this.checkProductDependencies(id);
-      if (dependencies.data?.hasDependencies) {
-        return {
-          data: null,
-          error: {
-            message:
-              'Não é possível excluir o produto pois ele está sendo usado em listas de compras',
-            code: 'DEPENDENCY_ERROR',
-          },
-        };
-      }
-
-      this.querySQLite(
-        'DELETE FROM tbl_products WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-
-      return { data: { success: true }, error: null };
-    } else {
-      // Verificar dependências
-      const dependencies = await this.checkProductDependencies(id);
-      if (dependencies.data?.hasDependencies) {
-        return {
-          data: null,
-          error: {
-            message:
-              'Não é possível excluir o produto pois ele está sendo usado em listas de compras',
-            code: 'DEPENDENCY_ERROR',
-          },
-        };
-      }
-
-      return await this.querySupabase('tbl_products', 'delete', null, {
-        id,
-        user_id: userId,
-      });
+    // 1. Verificar dependências
+    const deps = await this.checkProductDependencies(id);
+    if (deps.data?.hasDependencies) {
+      return {
+        data: null,
+        error: {
+          message:
+            'Não é possível excluir o produto pois ele está sendo usado em listas de compras',
+          code: 'DEPENDENCY_ERROR',
+        },
+      };
     }
+
+    // 2. Deletar
+    const result = await db
+      .from('tbl_products')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    return { data: { success: !result.error }, error: result.error };
   }
 
   // Métodos para Shopping Categories
   static async getShoppingCategories(userId: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_shopping_categories WHERE user_id = ?',
-        [userId],
-      );
-      return { data: result, error: null };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_categories',
-        'select',
-        null,
-        { user_id: userId },
-      );
-    }
+    const result = await db
+      .from('tbl_shopping_categories')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    return { data: result.data, error: result.error };
   }
 
   static async createShoppingCategory(categoryData: any) {
-    if (dbConfig.type === 'sqlite') {
-      const { name, user_id } = categoryData;
-      const result = this.querySQLite(
-        'INSERT INTO tbl_shopping_categories (name, user_id) VALUES (?, ?) RETURNING *',
-        [name, user_id],
-      );
-
-      if (result && result.length > 0) {
-        return {
-          data: result[0],
-          error: null,
-        };
-      }
-      return { data: null, error: { message: 'Erro ao criar categoria' } };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_categories',
-        'insert',
-        categoryData,
-      );
-    }
+    const result = await db
+      .from('tbl_shopping_categories')
+      .insert(categoryData)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async getShoppingCategoryById(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT * FROM tbl_shopping_categories WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-      return {
-        data: result && result.length > 0 ? result[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_categories',
-        'select',
-        null,
-        { id, user_id: userId },
-      );
-    }
+    const result = await db
+      .from('tbl_shopping_categories')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async updateShoppingCategory(
@@ -1331,290 +1126,127 @@ export class DatabaseService {
     userId: string | number,
     categoryData: any,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se a categoria existe e pertence ao usuário
-      const existing = await this.getShoppingCategoryById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Categoria não encontrada' } };
-      }
-
-      const { name } = categoryData;
-
-      this.querySQLite(
-        `UPDATE tbl_shopping_categories 
-         SET name = ?
-         WHERE id = ? AND user_id = ?`,
-        [name, id, userId],
-      );
-
-      // Buscar categoria atualizada
-      const updated = this.querySQLite(
-        'SELECT * FROM tbl_shopping_categories WHERE id = ?',
-        [id],
-      );
-
-      return {
-        data: updated && updated.length > 0 ? updated[0] : null,
-        error: null,
-      };
-    } else {
-      return await this.querySupabase(
-        'tbl_shopping_categories',
-        'update',
-        categoryData,
-        { id, user_id: userId },
-      );
-    }
+    const result = await db
+      .from('tbl_shopping_categories')
+      .update(categoryData)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    return { data: result.data, error: result.error };
   }
 
   static async checkCategoryDependencies(id: string | number) {
-    if (dbConfig.type === 'sqlite') {
-      const result = this.querySQLite(
-        'SELECT COUNT(*) as count FROM tbl_products WHERE category_id = ?',
-        [id],
-      );
-      const count = result && result.length > 0 ? result[0].count : 0;
-      return { data: { hasDependencies: count > 0, count }, error: null };
-    } else {
-      const result = await db
-        .from('tbl_products')
-        .select('id', { count: 'exact' })
-        .eq('category_id', id);
+    const result = await db
+      .from('tbl_products')
+      .select('id', { count: 'exact', head: true })
+      .eq('category_id', id);
 
-      return {
-        data: {
-          hasDependencies: (result.count || 0) > 0,
-          count: result.count || 0,
-        },
-        error: result.error,
-      };
-    }
+    return {
+      data: {
+        hasDependencies: (result.count || 0) > 0,
+        count: result.count || 0,
+      },
+      error: result.error,
+    };
   }
 
   static async deleteShoppingCategory(
     id: string | number,
     userId: string | number,
   ) {
-    if (dbConfig.type === 'sqlite') {
-      // Verificar se a categoria existe e pertence ao usuário
-      const existing = await this.getShoppingCategoryById(id, userId);
-      if (!existing || !existing.data) {
-        return { data: null, error: { message: 'Categoria não encontrada' } };
-      }
-
-      // Verificar dependências
-      const dependencies = await this.checkCategoryDependencies(id);
-      if (dependencies.data?.hasDependencies) {
-        return {
-          data: null,
-          error: {
-            message:
-              'Não é possível excluir a categoria pois ela está sendo usada por produtos',
-            code: 'DEPENDENCY_ERROR',
-          },
-        };
-      }
-
-      this.querySQLite(
-        'DELETE FROM tbl_shopping_categories WHERE id = ? AND user_id = ?',
-        [id, userId],
-      );
-
-      return { data: { success: true }, error: null };
-    } else {
-      // Verificar dependências
-      const dependencies = await this.checkCategoryDependencies(id);
-      if (dependencies.data?.hasDependencies) {
-        return {
-          data: null,
-          error: {
-            message:
-              'Não é possível excluir a categoria pois ela está sendo usada por produtos',
-            code: 'DEPENDENCY_ERROR',
-          },
-        };
-      }
-
-      return await this.querySupabase(
-        'tbl_shopping_categories',
-        'delete',
-        null,
-        { id, user_id: userId },
-      );
+    // 1. Dependências
+    const deps = await this.checkCategoryDependencies(id);
+    if (deps.data?.hasDependencies) {
+      return {
+        data: null,
+        error: {
+          message:
+            'Não é possível excluir a categoria pois ela está sendo usada por produtos',
+          code: 'DEPENDENCY_ERROR',
+        },
+      };
     }
+
+    const result = await db
+      .from('tbl_shopping_categories')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    return { data: { success: !result.error }, error: result.error };
   }
 
   static async getAllFinancialCategories(userId: string) {
-    if (dbConfig.type === 'sqlite') {
-      const sql = 'SELECT * FROM tbl_financial_categories WHERE user_id = ?';
-      const result = this.querySQLite(sql, [userId]);
-      return { data: result, error: null };
-    } else {
-      return await this.querySupabase(
-        'tbl_financial_categories',
-        'select',
-        null,
-        { user_id: userId },
-      );
-    }
+    const result = await db
+      .from('tbl_financial_categories')
+      .select('*')
+      .eq('user_id', userId);
+    return { data: result.data, error: result.error };
   }
 
   static async createShoppingList(listData: any) {
     const { name, items = [], user_id } = listData;
 
-    if (dbConfig.type === 'sqlite') {
-      try {
-        this.querySQLite(
-          `INSERT INTO tbl_shopping_lists (name, user_id, status, created_at)
-         VALUES (?, ?, 'pending', datetime('now'))`,
-          [name, user_id],
-        );
-
-        const listResult = this.querySQLite(
-          `SELECT * FROM tbl_shopping_lists WHERE rowid = last_insert_rowid()`,
-        );
-
-        if (!listResult || listResult.length === 0) {
-          return { data: null, error: { message: 'Erro ao criar lista' } };
-        }
-
-        const list = listResult[0];
-
-        if (!items || items.length === 0) {
-          return { data: { ...list, items: [] }, error: null };
-        }
-
-        const createdItems: any[] = [];
-
-        for (const product_id of items) {
-          const productCheck = this.querySQLite(
-            `SELECT * FROM tbl_products WHERE id = ? AND user_id = ?`,
-            [product_id, user_id],
-          );
-
-          if (!productCheck || productCheck.length === 0) {
-            this.querySQLite(
-              'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
-              [list.id],
-            );
-            this.querySQLite('DELETE FROM tbl_shopping_lists WHERE id = ?', [
-              list.id,
-            ]);
-
-            return {
-              data: null,
-              error: { message: `Produto não encontrado: ${product_id}` },
-            };
-          }
-
-          this.querySQLite(
-            `INSERT INTO tbl_shopping_list_items
-           (shopping_list_id, product_id, quantity, price, checked)
-           VALUES (?, ?, 1, 0.00, 0)`,
-            [list.id, product_id],
-          );
-
-          const itemResult = this.querySQLite(
-            `SELECT * FROM tbl_shopping_list_items WHERE rowid = last_insert_rowid()`,
-          );
-
-          if (!itemResult || itemResult.length === 0) {
-            this.querySQLite(
-              'DELETE FROM tbl_shopping_list_items WHERE shopping_list_id = ?',
-              [list.id],
-            );
-            this.querySQLite('DELETE FROM tbl_shopping_lists WHERE id = ?', [
-              list.id,
-            ]);
-
-            return { data: null, error: { message: 'Erro ao criar item' } };
-          }
-
-          createdItems.push(itemResult[0]);
-        }
-
-        return { data: { ...list, items: createdItems }, error: null };
-      } catch (error) {
-        return { data: null, error: { message: 'Erro ao criar lista' } };
-      }
-    }
-
-    const listInsert = await this.querySupabase(
-      'tbl_shopping_lists',
-      'insert',
-      {
+    // 1. Criar lista
+    const listInsert = await db
+      .from('tbl_shopping_lists')
+      .insert({
         name,
         user_id,
         status: 'pending',
-        created_at: new Date().toISOString(),
-      },
-    );
+        // created_at é default NOW()
+      })
+      .select()
+      .single();
 
-    if (!listInsert || listInsert.error || !listInsert.data?.[0]) {
+    if (listInsert.error) {
       return {
         data: null,
-        error: listInsert?.error ?? { message: 'Erro ao criar lista' },
+        error: listInsert.error,
       };
     }
 
-    const list = listInsert.data[0];
+    const list = listInsert.data;
 
+    // 2. Se não houver itens, retorna a lista
     if (!items || items.length === 0) {
       return { data: { ...list, items: [] }, error: null };
     }
 
-    for (const product_id of items) {
-      const productCheck = await this.querySupabase(
-        'tbl_products',
-        'select',
-        null,
-        { id: product_id, user_id },
-      );
+    // 3. Verificar se produtos existem (opcional, mas bom pra consistência)
+    // O Supabase vai dar erro de FK se não existirem, então podemos pular verificação manual se confiarmos na FK constraint.
+    // Mas para dar mensagem personalizada como no original, poderíamos verificar.
+    // Vamos confiar na FK constraint 'fk_product_id' ou 'on delete restrict' para simplificar,
+    // ou fazer a verificação se o usuário exigiu comportamento idêntico.
+    // O original fazia: "Produto não encontrado: ${product_id}" e deletava a lista criada.
 
-      if (
-        !productCheck ||
-        !productCheck.data ||
-        productCheck.data.length === 0
-      ) {
-        await this.querySupabase('tbl_shopping_lists', 'delete', null, {
-          id: list.id,
-          user_id,
-        });
+    // Vamos tentar inserir os itens. Se falhar, deletamos a lista.
+    const itemsToInsert = items.map((product_id: string) => ({
+      shopping_list_id: list.id,
+      product_id,
+      quantity: 1,
+      price: 0,
+      checked: false,
+    }));
 
-        return {
-          data: null,
-          error: { message: `Produto não encontrado: ${product_id}` },
-        };
-      }
-    }
+    const itemsInsert = await db
+      .from('tbl_shopping_list_items')
+      .insert(itemsToInsert)
+      .select();
 
-    const supabaseInsertItems = await this.querySupabase(
-      'tbl_shopping_list_items',
-      'insert',
-      items.map((product_id: string) => ({
-        shopping_list_id: list.id,
-        product_id,
-        quantity: 1,
-        price: 0,
-        checked: false,
-        user_id,
-      })),
-    );
-
-    if (!supabaseInsertItems || supabaseInsertItems.error) {
-      await this.querySupabase('tbl_shopping_lists', 'delete', null, {
-        id: list.id,
-        user_id,
-      });
+    if (itemsInsert.error) {
+      // Rollback manual
+      await db.from('tbl_shopping_lists').delete().eq('id', list.id);
 
       return {
         data: null,
-        error: supabaseInsertItems?.error ?? { message: 'Erro ao criar itens' },
+        error: itemsInsert.error, // Retorna o erro do banco (provavelmente FK violation se produto não existir)
       };
     }
 
     return {
-      data: { ...list, items: supabaseInsertItems.data || [] },
+      data: { ...list, items: itemsInsert.data || [] },
       error: null,
     };
   }

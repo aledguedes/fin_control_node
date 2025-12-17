@@ -3,6 +3,7 @@ import { DatabaseService } from '../services/databaseService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../validation';
 import { normalizeProductPayload } from '../middleware/normalizeProductPayload';
+import { cacheMiddleware, invalidateCache } from '../middleware/cache';
 
 import {
   shoppingListSchema,
@@ -45,6 +46,7 @@ const router = express.Router();
 router.get(
   '/lists',
   authenticateToken,
+  cacheMiddleware({ maxAge: 300 }), // 5 minutos
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -129,6 +131,7 @@ router.get(
 router.post(
   '/lists',
   authenticateToken,
+  invalidateCache,
   validateRequest(shoppingListSchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -197,6 +200,7 @@ router.post(
 router.get(
   '/products',
   authenticateToken,
+  cacheMiddleware({ maxAge: 300 }), // 5 minutos
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -244,6 +248,7 @@ router.get(
 router.get(
   '/categories',
   authenticateToken,
+  cacheMiddleware({ maxAge: 600 }), // 10 minutos - categorias mudam pouco
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -264,6 +269,7 @@ router.get(
 router.post(
   '/categories',
   authenticateToken,
+  invalidateCache,
   validateRequest(shoppingCategorySchema),
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -334,6 +340,7 @@ router.post(
 router.post(
   '/products',
   authenticateToken,
+  invalidateCache,
   normalizeProductPayload,
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -400,6 +407,7 @@ router.post(
 router.get(
   '/lists/:id',
   authenticateToken,
+  cacheMiddleware({ maxAge: 180 }), // 3 minutos - lista pode mudar frequentemente
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -458,6 +466,7 @@ router.get(
 router.put(
   '/lists/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -530,6 +539,7 @@ router.put(
 router.delete(
   '/lists/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -597,6 +607,7 @@ router.put(
   // Alterado para PUT, mais adequado para atualização/sincronização
   '/lists/:id/complete',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       // Dados de cabeçalho da lista enviados pelo front-end (opcional)
@@ -697,6 +708,7 @@ router.put(
 router.post(
   '/lists/:listId/items',
   authenticateToken,
+  invalidateCache,
   // validateRequest(shoppingListItemSchema), // Removido para suportar array
   async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -818,6 +830,7 @@ router.post(
 router.put(
   '/lists/:listId/items/:itemId',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -897,6 +910,7 @@ router.put(
 router.delete(
   '/lists/:listId/items/:itemId',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -984,6 +998,7 @@ router.delete(
 router.put(
   '/products/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -1062,6 +1077,7 @@ router.put(
 router.delete(
   '/products/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -1137,6 +1153,7 @@ router.delete(
 router.post(
   '/categories',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -1222,6 +1239,7 @@ router.post(
 router.put(
   '/categories/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -1302,6 +1320,7 @@ router.put(
 router.delete(
   '/categories/:id',
   authenticateToken,
+  invalidateCache,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.userId;
@@ -1323,6 +1342,127 @@ router.delete(
       }
 
       res.json({ message: 'Categoria excluída com sucesso' });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * @swagger
+ * /shopping/cleanup-orphaned-transactions:
+ *   post:
+ *     summary: Limpar transações órfãs
+ *     description: Remove transações financeiras de listas de compras que foram deletadas
+ *     tags:
+ *       - Compras - Listas
+ *     responses:
+ *       200:
+ *         description: Limpeza executada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 deletedCount:
+ *                   type: number
+ *       500:
+ *         description: Erro ao executar limpeza
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Limpar transações órfãs (transações de listas deletadas)
+router.post(
+  '/cleanup-orphaned-transactions',
+  authenticateToken,
+  invalidateCache,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const result = await DatabaseService.cleanupOrphanedShoppingTransactions(
+        userId,
+      );
+
+      if (result?.error) {
+        return next(createError(result.error.message, 500));
+      }
+
+      res.json({
+        message: result.data?.message || 'Limpeza concluída',
+        deletedCount: result.data?.deletedCount || 0,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * @swagger
+ * /shopping/transactions/{transactionId}:
+ *   delete:
+ *     summary: Deletar transação de compras específica
+ *     description: Remove uma transação financeira específica de compras por ID
+ *     tags:
+ *       - Compras - Listas
+ *     parameters:
+ *       - in: path
+ *         name: transactionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID da transação a ser deletada
+ *     responses:
+ *       200:
+ *         description: Transação deletada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *       404:
+ *         description: Transação não encontrada
+ *       500:
+ *         description: Erro ao deletar transação
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Deletar transação específica de compras
+router.delete(
+  '/transactions/:transactionId',
+  authenticateToken,
+  invalidateCache,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.userId;
+      const { transactionId } = req.params;
+
+      if (!transactionId) {
+        return next(createError('ID da transação é obrigatório', 400));
+      }
+
+      const result = await DatabaseService.deleteShoppingTransaction(
+        transactionId,
+        userId,
+      );
+
+      if (result?.error) {
+        const statusCode =
+          result.error.message === 'Transação não encontrada' ? 404 : 500;
+        return next(createError(result.error.message, statusCode));
+      }
+
+      res.json({
+        message: result.data?.message || 'Transação deletada com sucesso',
+      });
     } catch (error) {
       next(error);
     }

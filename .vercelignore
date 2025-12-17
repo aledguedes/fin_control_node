@@ -1,0 +1,41 @@
+# Arquivos de desenvolvimento
+node_modules
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+__tests__
+test
+
+# Arquivos de configuração local
+.env
+.env.development
+.env.test
+.env.local
+*.local
+
+# Arquivos de build temporários
+*.log
+*.map
+coverage
+.nyc_output
+
+# Arquivos do sistema
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Arquivos de banco de dados local
+*.sqlite
+*.sqlite3
+*.db
+
+# Documentação e arquivos de teste
+README.md
+*.md
+test_*.js
+test_*.txt
+

@@ -35,6 +35,12 @@ describe('Shopping list complete creates financial transaction', () => {
 
     const categoryId = categoryRes.body.category.id;
 
+    // Create the required Financial Category for the completion logic
+    await request(app)
+      .post('/api/v1/financial/categories')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Alimentação', type: 'expense' });
+
     // Create product with real category
     const productRes2 = await request(app)
       .post('/api/v1/shopping/products')
