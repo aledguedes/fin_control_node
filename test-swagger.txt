@@ -1,0 +1,35 @@
+/**
+ * @swagger
+ * /test:
+ *   post:
+ *     summary: Test
+ *     tags:
+ *       - "Test"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               description:
+ *                 type: string
+ *                 description: Test description
+ *                 example: Test
+ *               amount:
+ *                 type: number
+ *                 format: decimal
+ *                 description: Test amount
+ *                 example: 100.00
+ *     responses:
+ *       201:
+ *         description: Success
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Success
+ */

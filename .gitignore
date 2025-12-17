@@ -37,6 +37,9 @@ lerna-debug.log*
 
 # dotenv environment variable files
 .env
+.env.development
+.env.production
+.env.test
 .env.development.local
 .env.test.local
 .env.production.local
@@ -54,3 +57,24 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Vercel
+.vercel
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+dev.sqlite3
+
+# Test files and outputs
+test_*.js
+test_*.txt
+test-*.js
+test-*.txt
+
+# Source maps (optional - uncomment if you don't want to commit them)
+# *.map
+
+# Documentation files (deploy guides)
+VERCEL_DEPLOY.md

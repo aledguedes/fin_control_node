@@ -88,7 +88,7 @@ export interface Product {
 export interface ShoppingList {
   id: string;
   name: string;
-  status: 'andamento' | 'finalizada';
+  status: 'pending' | 'completed';
   created_at: string;
   completed_at?: string;
   total_amount?: number;
