@@ -129,7 +129,9 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
 });
 
-if (process.env['NODE_ENV'] !== 'test') {
+// Não iniciar servidor HTTP quando executado na Vercel (serverless)
+// A Vercel fornece a variável de ambiente VERCEL automaticamente
+if (process.env['NODE_ENV'] !== 'test' && !process.env['VERCEL']) {
   app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`📊 Ambiente: ${process.env['NODE_ENV'] || 'development'}`);
