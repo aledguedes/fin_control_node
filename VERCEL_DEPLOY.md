@@ -33,8 +33,16 @@ Configure as seguintes variáveis de ambiente no painel da Vercel (Settings > En
 ### Opcionais:
 
 - `ALLOWED_ORIGINS`: Lista de origens permitidas para CORS (separadas por vírgula)
-  - Exemplo: `https://meuapp.vercel.app,https://www.meuapp.com`
-- `ALLOW_ALL_ORIGINS`: `true` para permitir todas as origens (não recomendado em produção)
+  - **Durante desenvolvimento**: Pode deixar sem configurar (usa localhost por padrão)
+  - **Após deploy do frontend**: Configure com as URLs do frontend
+  - **Se frontend na Vercel**: `https://seu-frontend.vercel.app` (inclua também preview URLs se necessário)
+  - **Se frontend na Netlify**: `https://seu-frontend.netlify.app` ou domínio customizado
+  - **Exemplo completo**: `https://meuapp.vercel.app,https://meuapp.netlify.app,https://www.meuapp.com`
+  - **Importante**: Inclua todas as variações (com/sem www, com/sem https)
+- `ALLOW_ALL_ORIGINS`: `true` para permitir todas as origens
+  - ⚠️ **Use apenas temporariamente durante desenvolvimento/testes**
+  - ⚠️ **NÃO recomendado em produção** por questões de segurança
+  - Útil apenas se você não souber ainda qual será a URL do frontend
 - `JWT_EXPIRES_IN`: Tempo de expiração do token (padrão: `24h`)
 - `GOOGLE_CLIENT_ID`: Client ID do Google OAuth (se usar autenticação Google)
 
@@ -51,18 +59,22 @@ A Vercel detectará automaticamente a configuração do `vercel.json` e fará o 
 ## Deploy via CLI
 
 1. **Login na Vercel:**
+
    ```bash
    vercel login
    ```
 
 2. **Deploy de preview (desenvolvimento):**
+
    ```bash
    vercel
    ```
+
    - Seguir prompts para conectar projeto
    - Escolher criar novo projeto ou linkar existente
 
 3. **Configurar variáveis de ambiente via CLI:**
+
    ```bash
    vercel env add NODE_ENV
    vercel env add SUPABASE_URL
@@ -94,6 +106,44 @@ Após o deploy, você pode verificar se está funcionando:
 - `GET /api/v1/shopping/lists` - Listar listas de compras
 - ... (veja CONFIGURACAO.md para lista completa)
 
+## Configuração de CORS para Frontend
+
+### Durante Desenvolvimento
+
+Se o frontend ainda não foi deployado, você pode:
+
+1. **Deixar `ALLOWED_ORIGINS` sem configurar** - O backend permitirá localhost automaticamente em desenvolvimento
+2. **Usar `ALLOW_ALL_ORIGINS=true` temporariamente** - Apenas para testes, remova antes de produção
+
+### Após Deploy do Frontend
+
+Quando o frontend estiver deployado, configure `ALLOWED_ORIGINS` com as URLs exatas:
+
+**Se frontend na Vercel:**
+
+```
+ALLOWED_ORIGINS=https://seu-frontend.vercel.app,https://seu-frontend-git-main.vercel.app
+```
+
+**Se frontend na Netlify:**
+
+```
+ALLOWED_ORIGINS=https://seu-frontend.netlify.app
+```
+
+**Se tiver domínio customizado:**
+
+```
+ALLOWED_ORIGINS=https://seu-frontend.vercel.app,https://www.seudominio.com,https://seudominio.com
+```
+
+**Dicas:**
+
+- Inclua todas as variações de URL (com/sem www, preview URLs se necessário)
+- URLs devem começar com `https://` ou `http://`
+- Separe múltiplas URLs por vírgula (sem espaços)
+- Após configurar, faça um novo deploy do backend para aplicar as mudanças
+
 ## Considerações Importantes
 
 - **Serverless**: A Vercel executa como serverless functions, não há servidor HTTP tradicional
@@ -105,19 +155,25 @@ Após o deploy, você pode verificar se está funcionando:
 ## Troubleshooting
 
 ### Erro: "Cannot find module"
+
 - Verifique se todas as dependências estão no `package.json`
 - Certifique-se de que o build está funcionando localmente: `npm run build`
 
 ### Erro: "Environment variable not found"
+
 - Verifique se todas as variáveis de ambiente obrigatórias estão configuradas
 - Certifique-se de que as variáveis estão configuradas para o ambiente correto (Production, Preview, Development)
 
 ### Erro de CORS
-- Configure `ALLOWED_ORIGINS` com a URL exata do seu frontend
+
+- Configure `ALLOWED_ORIGINS` com a URL exata do seu frontend (incluindo `https://`)
 - Verifique se o frontend está fazendo requisições para a URL correta da Vercel
+- Certifique-se de que não há espaços na lista de `ALLOWED_ORIGINS` (use vírgulas)
+- Se ainda não souber a URL do frontend, use `ALLOW_ALL_ORIGINS=true` temporariamente (apenas para testes)
+- Após configurar `ALLOWED_ORIGINS`, faça um novo deploy do backend
 
 ### Timeout
+
 - Verifique se há operações síncronas bloqueantes no código
 - Considere otimizar queries ao banco de dados
 - Upgrade para plano Pro se necessário (60s timeout)
-

@@ -75,3 +75,6 @@ test-*.txt
 
 # Source maps (optional - uncomment if you don't want to commit them)
 # *.map
+
+# Documentation files (deploy guides)
+VERCEL_DEPLOY.md
