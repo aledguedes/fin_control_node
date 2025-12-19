@@ -3,6 +3,22 @@ import { databaseManager } from '../config/database';
 const db = databaseManager.getDatabase();
 const dbConfig = databaseManager.getConfig();
 
+/**
+ * Normaliza o nome do produto para comparação:
+ * - Remove acentos
+ * - Converte para minúsculas
+ * - Remove espaços extras e faz trim
+ */
+function normalizeProductName(name: string): string {
+  if (!name) return '';
+
+  // Remove acentos
+  const withoutAccents = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Converte para minúsculas, remove espaços extras e faz trim
+  return withoutAccents.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 export class DatabaseService {
   // Métodos genéricos para Supabase
   private static async querySupabase(
@@ -1016,7 +1032,59 @@ export class DatabaseService {
     return { data: result.data, error: result.error };
   }
 
+  /**
+   * Verifica se já existe um produto com o mesmo nome normalizado para o usuário
+   */
+  private static async checkProductNameDuplicate(
+    name: string,
+    userId: string | number,
+    excludeId?: string | number,
+  ) {
+    if (!name) return null;
+
+    // Buscar todos os produtos do usuário
+    const result = await db
+      .from('tbl_products')
+      .select('id, name')
+      .eq('user_id', userId);
+
+    if (result.error) {
+      return null; // Em caso de erro, retorna null para não bloquear
+    }
+
+    const normalizedNewName = normalizeProductName(name);
+
+    // Verificar se algum produto tem o mesmo nome normalizado
+    for (const product of result.data || []) {
+      // Se estiver atualizando, ignora o próprio produto
+      if (excludeId && product.id === excludeId) {
+        continue;
+      }
+
+      const normalizedExistingName = normalizeProductName(product.name);
+      if (normalizedExistingName === normalizedNewName) {
+        return product; // Retorna o produto duplicado encontrado
+      }
+    }
+
+    return null; // Nenhum duplicado encontrado
+  }
+
   static async createProduct(productData: any) {
+    const { name, user_id } = productData;
+
+    // Verificar se já existe produto com o mesmo nome normalizado
+    const duplicate = await this.checkProductNameDuplicate(name, user_id);
+    if (duplicate) {
+      return {
+        data: null,
+        error: {
+          message: `Já existe um produto cadastrado com o nome "${duplicate.name}". Produtos com nomes similares (com ou sem acentos, maiúsculas/minúsculas) são considerados iguais.`,
+          code: 'DUPLICATE_PRODUCT_NAME',
+        },
+      };
+    }
+
     const result = await db
       .from('tbl_products')
       .insert(productData)
@@ -1040,6 +1108,26 @@ export class DatabaseService {
     userId: string | number,
     productData: any,
   ) {
+    const { name } = productData;
+
+    // Se o nome está sendo atualizado, verificar duplicatas
+    if (name) {
+      const duplicate = await this.checkProductNameDuplicate(
+        name,
+        userId,
+        id, // Exclui o próprio produto da verificação
+      );
+      if (duplicate) {
+        return {
+          data: null,
+          error: {
+            message: `Já existe um produto cadastrado com o nome "${duplicate.name}". Produtos com nomes similares (com ou sem acentos, maiúsculas/minúsculas) são considerados iguais.`,
+            code: 'DUPLICATE_PRODUCT_NAME',
+          },
+        };
+      }
+    }
+
     const result = await db
       .from('tbl_products')
       .update(productData)

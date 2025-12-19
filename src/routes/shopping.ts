@@ -329,6 +329,16 @@ router.post(
  *               properties:
  *                 product:
  *                   $ref: '#/components/schemas/Product'
+ *       400:
+ *         description: Produto duplicado (já existe produto com nome similar)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Já existe um produto cadastrado com o nome "Água Sanitária". Produtos com nomes similares (com ou sem acentos, maiúsculas/minúsculas) são considerados iguais.
  *       500:
  *         description: Erro ao criar produto
  *         content:
@@ -355,6 +365,10 @@ router.post(
       });
 
       if (result?.error) {
+        // Erro de produto duplicado
+        if (result.error.code === 'DUPLICATE_PRODUCT_NAME') {
+          return res.status(400).json({ error: result.error.message });
+        }
         return next(createError('Erro ao criar produto', 500));
       }
 
@@ -987,6 +1001,16 @@ router.delete(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
+ *       400:
+ *         description: Produto duplicado (já existe produto com nome similar)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Já existe um produto cadastrado com o nome "Água Sanitária". Produtos com nomes similares (com ou sem acentos, maiúsculas/minúsculas) são considerados iguais.
  *       500:
  *         description: Erro ao atualizar produto
  *         content:
@@ -1016,6 +1040,10 @@ router.put(
       });
 
       if (result?.error) {
+        // Erro de produto duplicado
+        if (result.error.code === 'DUPLICATE_PRODUCT_NAME') {
+          return res.status(400).json({ error: result.error.message });
+        }
         const statusCode =
           result.error.message === 'Produto não encontrado' ? 404 : 500;
         return next(createError(result.error.message, statusCode));
